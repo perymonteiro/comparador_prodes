@@ -1,0 +1,35 @@
+{
+  "name": "comparador_prodes",
+  "label": "Comparador Prodes",
+  "type": "widget",
+  "version": "1.0.0",
+  "exbVersion": "1.18.0",
+  "author": "Thyego Pery",
+  "description": "widget dedicada a realizar cálculos da variação de desmatamento entre anos ou períodos por meio do Prodes/Inpe. Ferramenta desenvolvida com contribuição da equipe da CGCD/DPCD.",
+  "copyright": "MMA",
+  "license": "não requerida",
+  "properties": {
+    "hasSettingPage": true
+  },
+  "dependency": [
+    "jimu-arcgis"
+  ],
+  "useDataSources": [
+    {
+      "types": [
+        "FEATURE_LAYER"
+      ]
+    }
+  ],
+  "supportedLocales": [
+    "pt-br",
+    "en"
+  ],
+  "translatedLocales": [
+    "en"
+  ],
+  "defaultSize": {
+    "width": 360,
+    "height": 420
+  }
+}
