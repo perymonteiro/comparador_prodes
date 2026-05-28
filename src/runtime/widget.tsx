@@ -76,7 +76,9 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         useDataSource={useDs}
         widgetId={props.id}
         onDataSourceCreated={handleDataSourceReady}
-        onDataSourceSchemaChange={applySchema}
+        onDataSourceSchemaChange={(schema) => {
+          applySchema(schema)
+        }}
         onDataSourceInfoChange={(info) => setDsStatus(info?.status)}
       />
 

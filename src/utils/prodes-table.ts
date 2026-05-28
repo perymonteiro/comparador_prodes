@@ -199,6 +199,8 @@ type RecordLike =
         feature?: { attributes?: Record<string, unknown> }
       }
       getFieldValue?: (jimuFieldName: string) => unknown
+      getDateFieldValue?: (jimuFieldName: string) => unknown
+      getDataBeforeMapping?: () => Record<string, unknown>
     }
 
 function toPlainObject (value: unknown): Record<string, unknown> {
@@ -248,6 +250,10 @@ export function getPlainAttributes (rec: RecordLike): Record<string, unknown> {
 
   if ('attributes' in rec && rec.attributes) {
     merge(rec.attributes)
+  }
+
+  if ('getDataBeforeMapping' in rec && typeof rec.getDataBeforeMapping === 'function') {
+    merge(rec.getDataBeforeMapping())
   }
 
   return merged
@@ -316,8 +322,29 @@ export function readRecordValue (
     }
   }
 
+  if (
+    field?.jimuName &&
+    'getDateFieldValue' in rec &&
+    typeof rec.getDateFieldValue === 'function'
+  ) {
+    try {
+      const v = rec.getDateFieldValue!(field.jimuName)
+      if (v !== undefined) return v
+    } catch {
+      // ignora
+    }
+  }
+
   const attrs = getPlainAttributes(rec)
-  return readAttributeFlexible(attrs, field, fallbackJimuName)
+  const fromMapped = readAttributeFlexible(attrs, field, fallbackJimuName)
+  if (fromMapped !== undefined) return fromMapped
+
+  if ('getDataBeforeMapping' in rec && typeof rec.getDataBeforeMapping === 'function') {
+    const raw = toPlainObject(rec.getDataBeforeMapping())
+    return readAttributeFlexible(raw, field, fallbackJimuName)
+  }
+
+  return undefined
 }
 
 function readAttribute (
@@ -377,12 +404,15 @@ type QueriableLayer = {
 
 const queryOptions = { scope: QueryScope.InAllData }
 
-const buildQueryParams = (outFields: string[] = ['*']) => ({
+const buildQueryParams = (
+  outFields: string[] = ['*'],
+  disableClientQuery = false
+) => ({
   where: '1=1',
   outFields,
   returnGeometry: false,
   pageSize: 2000,
-  disableClientQuery: true
+  ...(disableClientQuery ? { disableClientQuery: true } : {})
 })
 
 function recordsAreReadable (records: DataRecord[]): boolean {
@@ -390,16 +420,26 @@ function recordsAreReadable (records: DataRecord[]): boolean {
 }
 
 async function queryViaJsapiLayer (ds: QueriableLayer): Promise<DataRecord[]> {
-  const layer = ds.layer
-  if (!layer?.queryFeatures || typeof ds.buildRecord !== 'function') return []
+  const layer = ds.layer as {
+    queryFeatures?: (q: object) => Promise<{ features?: unknown[] }>
+    query?: (q: object) => Promise<{ features?: unknown[] }>
+  }
+  if (!layer || typeof ds.buildRecord !== 'function') return []
+
+  const q = {
+    where: '1=1',
+    outFields: ['*'],
+    returnGeometry: false,
+    num: 2000
+  }
 
   try {
-    const result = await layer.queryFeatures({
-      where: '1=1',
-      outFields: ['*'],
-      returnGeometry: false,
-      num: 2000
-    })
+    const result =
+      typeof layer.queryFeatures === 'function'
+        ? await layer.queryFeatures(q)
+        : typeof layer.query === 'function'
+          ? await layer.query(q)
+          : null
     const features = result?.features ?? []
     return features.map((f) => ds.buildRecord!(f))
   } catch {
@@ -407,16 +447,18 @@ async function queryViaJsapiLayer (ds: QueriableLayer): Promise<DataRecord[]> {
   }
 }
 
-async function queryAllRecords (
+async function runQueryableMethods (
   ds: QueriableLayer,
-  outFields: string[] = ['*']
+  outFields: string[],
+  disableClientQuery: boolean
 ): Promise<DataRecord[]> {
-  const params = buildQueryParams(outFields)
+  const params = buildQueryParams(outFields, disableClientQuery)
 
   if (typeof ds?.load === 'function') {
     try {
       const records = await ds.load(params, queryOptions)
-      if (records?.length) return records
+      if (records?.length && recordsAreReadable(records)) return records
+      if (records?.length && !disableClientQuery) return records
     } catch {
       // tenta próximo método
     }
@@ -425,7 +467,8 @@ async function queryAllRecords (
   if (typeof ds?.loadAll === 'function') {
     try {
       const records = await ds.loadAll(params, undefined, undefined, queryOptions)
-      if (records?.length) return records
+      if (records?.length && recordsAreReadable(records)) return records
+      if (records?.length && !disableClientQuery) return records
     } catch {
       // tenta query abaixo
     }
@@ -434,13 +477,32 @@ async function queryAllRecords (
   if (typeof ds?.query === 'function') {
     try {
       const result = await ds.query(params, queryOptions)
-      return result?.records ?? []
+      const records = result?.records ?? []
+      if (records.length && recordsAreReadable(records)) return records
+      if (records.length && !disableClientQuery) return records
     } catch {
       // tenta JS API
     }
   }
 
-  return queryViaJsapiLayer(ds)
+  const viaLayer = await queryViaJsapiLayer(ds)
+  if (viaLayer.length && recordsAreReadable(viaLayer)) return viaLayer
+  if (viaLayer.length && !disableClientQuery) return viaLayer
+
+  return []
+}
+
+async function queryAllRecords (
+  ds: QueriableLayer,
+  outFields: string[] = ['*']
+): Promise<DataRecord[]> {
+  let records = await runQueryableMethods(ds, outFields, false)
+  if (recordsAreReadable(records)) return records
+
+  records = await runQueryableMethods(ds, outFields, true)
+  if (recordsAreReadable(records)) return records
+
+  return records
 }
 
 export interface FetchLayerRecordsOptions {
@@ -587,6 +649,57 @@ function buildYearSeriesYearRows (
   return series.sort((a, b) => a.year - b.year)
 }
 
+function collectRecordAttributeKeys (records: RecordLike[]): string[] {
+  const keys = new Set<string>()
+  for (const rec of records.slice(0, 100)) {
+    Object.keys(getPlainAttributes(rec)).forEach((k) => keys.add(k))
+  }
+  return [...keys]
+}
+
+function resolveKeysFromAttributeNames (
+  keys: string[],
+  yearFieldJimu: string,
+  recorteFieldJimu: string
+): { yearKey: string; recorteKey: string } | null {
+  const recorteKey = keys.find(
+    (k) =>
+      k.toLowerCase() === recorteFieldJimu.toLowerCase() ||
+      normalizeRecorteToken(k) === normalizeRecorteToken(recorteFieldJimu)
+  )
+  let yearKey = keys.find((k) => k.toLowerCase() === yearFieldJimu.toLowerCase())
+  if (!yearKey) {
+    yearKey = keys.find((k) =>
+      YEAR_NAME_PATTERNS.some(
+        (p) => k.toLowerCase() === p || k.toLowerCase().includes(p)
+      )
+    )
+  }
+  if (!yearKey || !recorteKey) return null
+  return { yearKey, recorteKey }
+}
+
+/** Último recurso: infere colunas pelos nomes reais nos atributos retornados. */
+export function buildYearSeriesInferred (
+  records: RecordLike[],
+  yearFieldJimu: string,
+  recorteFieldJimu: string
+): YearValueRow[] {
+  const keys = collectRecordAttributeKeys(records)
+  const resolved = resolveKeysFromAttributeNames(keys, yearFieldJimu, recorteFieldJimu)
+  if (!resolved) return []
+
+  const series: YearValueRow[] = []
+  for (const rec of records) {
+    const attrs = getPlainAttributes(rec)
+    const year = parseYear(attrs[resolved.yearKey])
+    const value = parseNumericValue(attrs[resolved.recorteKey])
+    if (year == null || value == null) continue
+    series.push({ year, value })
+  }
+  return series.sort((a, b) => a.year - b.year)
+}
+
 export function buildYearSeries (
   records: RecordLike[],
   yearFieldJimu: string,
@@ -602,10 +715,11 @@ export function buildYearSeries (
   if (yearRows.length > 0) return yearRows
 
   if (fields?.length) {
-    return buildYearSeriesFromRecorteRows(records, recorteFieldJimu, fields)
+    const alt = buildYearSeriesFromRecorteRows(records, recorteFieldJimu, fields)
+    if (alt.length > 0) return alt
   }
 
-  return yearRows
+  return buildYearSeriesInferred(records, yearFieldJimu, recorteFieldJimu)
 }
 
 export function formatYearsRangeSummary (series: YearValueRow[]): string | null {

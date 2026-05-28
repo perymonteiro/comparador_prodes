@@ -12,8 +12,8 @@ import {
   type YearValueRow
 } from '../../utils/prodes-table'
 import {
-  getDataSourceSchema,
-  getMainDataSource,
+  ensureDataSourceSchema,
+  getQueryableDataSource,
   isQueryableStatus
 } from '../../utils/data-source'
 import {
@@ -44,12 +44,13 @@ export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesPar
 
   const handleDataSourceReady = React.useCallback((ds: DataSource) => {
     setDsRef(ds)
-    const schema = getDataSourceSchema(ds)
-    if (schema) applySchema(schema)
+    void ensureDataSourceSchema(ds).then((schema) => {
+      if (schema) applySchema(schema)
+    })
   }, [applySchema])
 
   const loadSeries = React.useCallback(async () => {
-    const main = getMainDataSource(dsRef)
+    const main = getQueryableDataSource(dsRef)
     if (!main || !effectiveYearField || !recorteField) {
       setSeries([])
       return

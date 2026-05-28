@@ -1,6 +1,7 @@
 import {
   buildYearSeries,
   buildYearSeriesFromRecorteRows,
+  buildYearSeriesInferred,
   readAttributeFlexible,
   readRecordValue,
   getPlainAttributes,
@@ -159,6 +160,26 @@ describe('prodes-table utils', () => {
     ]
     const series = buildYearSeries(records, 'ano', 'cerrado', fields as any)
     expect(series).toEqual([{ year: 2010, value: 1551.8 }])
+  })
+
+  it('buildYearSeriesInferred resolves service field names on attributes', () => {
+    const records = [{ attributes: { ANO: 2015, CERRADO: 2500 } }]
+    const series = buildYearSeriesInferred(records, 'ano', 'cerrado')
+    expect(series).toEqual([{ year: 2015, value: 2500 }])
+  })
+
+  it('readRecordValue uses getDataBeforeMapping when getData is empty', () => {
+    const rec = {
+      getData: () => ({}),
+      getDataBeforeMapping: () => ({ ANO: 2018, cerrado: 100 }),
+      getFieldValue: () => undefined
+    }
+    expect(
+      buildYearSeries([rec], 'ano', 'cerrado', [
+        { jimuName: 'ano', name: 'ANO', type: JimuFieldType.Number },
+        { jimuName: 'cerrado', name: 'cerrado', type: JimuFieldType.Number }
+      ] as any)
+    ).toEqual([{ year: 2018, value: 100 }])
   })
 
   it('getPlainAttributes reads flat Jimu getData map (Enterprise)', () => {
