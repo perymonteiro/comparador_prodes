@@ -32,10 +32,11 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const {
     series,
     loading,
+    loadingMessage,
     error,
     handleDataSourceReady,
+    handleDataSourceInfoChange,
     applySchema,
-    setDsStatus,
     waitingForLayer
   } = useProdesSeries({ recorteField, yearField, widgetId: props.id })
 
@@ -64,36 +65,41 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const showForm =
     isConfigured && !loading && !waitingForLayer && !error && series.length > 0
 
-  if (!isConfigured) {
-    return (
-      <div className="widget-comparador-prodes jimu-widget" css={widgetStyles}>
-        <p>{MSG_NOT_CONFIGURED}</p>
-      </div>
-    )
-  }
-
   return (
     <div className="widget-comparador-prodes jimu-widget" css={widgetStyles}>
-      <DataSourceComponent
-        useDataSource={useDs}
-        widgetId={props.id}
-        query={PRODES_TABLE_QUERY}
-        queryScope={QueryScope.InAllData}
-        queryAll
-        onDataSourceCreated={handleDataSourceReady}
-        onDataSourceSchemaChange={(schema) => {
-          applySchema(schema)
-        }}
-        onDataSourceInfoChange={(info) => setDsStatus(info?.status)}
-      />
-
-      {(loading || waitingForLayer) && <Loading />}
-
-      {error && <p className="comparador-error">{error}</p>}
-
-      {!loading && !waitingForLayer && !error && series.length === 0 && (
-        <p>{MSG_NO_DATA}</p>
+      {useDs && (
+        <DataSourceComponent
+          useDataSource={useDs}
+          widgetId={props.id}
+          query={PRODES_TABLE_QUERY}
+          queryScope={QueryScope.InAllData}
+          queryAll
+          onDataSourceCreated={handleDataSourceReady}
+          onDataSourceSchemaChange={(schema) => {
+            applySchema(schema)
+          }}
+          onDataSourceInfoChange={handleDataSourceInfoChange}
+        />
       )}
+
+      {!isConfigured && <p>{MSG_NOT_CONFIGURED}</p>}
+
+      {isConfigured && (loading || waitingForLayer) && (
+        <div>
+          <Loading />
+          {loadingMessage && (
+            <p className="comparador-hint">{loadingMessage}</p>
+          )}
+        </div>
+      )}
+
+      {isConfigured && error && <p className="comparador-error">{error}</p>}
+
+      {isConfigured &&
+        !loading &&
+        !waitingForLayer &&
+        !error &&
+        series.length === 0 && <p>{MSG_NO_DATA}</p>}
 
       {showForm && (
         <div className="comparador-form">

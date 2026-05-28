@@ -4,7 +4,9 @@ import {
   JimuFieldType,
   EsriFieldType,
   QueryScope,
-  type DataRecord
+  type DataRecord,
+  esri,
+  requestUtils
 } from 'jimu-core'
 
 export interface YearValueRow {
@@ -484,8 +486,7 @@ async function fetchViaArcgisRest (
 ): Promise<Record<string, unknown>[]> {
   if (!ds.url) return []
   try {
-    const { queryFeatures } = await import('@esri/arcgis-rest-feature-service')
-    const res = await queryFeatures({
+    const res = await esri.restFeatureService.queryFeatures({
       url: ds.url,
       where: '1=1',
       outFields: ['*'],
@@ -501,6 +502,34 @@ async function fetchViaArcgisRest (
       .filter((a) => Object.keys(a).length > 0)
   } catch {
     return []
+  }
+}
+
+/** Consulta REST com credencial do Portal (Enterprise). */
+export async function fetchViaPortalRest (
+  ds: { url?: string }
+): Promise<Record<string, unknown>[]> {
+  if (!ds.url) return []
+  try {
+    const res = await requestUtils.requestWrapper(ds.url, (session) =>
+      esri.restFeatureService.queryFeatures({
+        url: ds.url,
+        where: '1=1',
+        outFields: ['*'],
+        returnGeometry: false,
+        authentication: session
+      })
+    )
+    const features =
+      res && typeof res === 'object' && 'features' in res
+        ? (res as { features?: Array<{ attributes?: Record<string, unknown> }> })
+            .features ?? []
+        : []
+    return features
+      .map((f) => ({ ...(f.attributes ?? {}) }))
+      .filter((a) => Object.keys(a).length > 0)
+  } catch {
+    return fetchViaArcgisRest(ds)
   }
 }
 
@@ -660,11 +689,31 @@ export function buildYearSeriesFromAttributeRows (
   if (standard.length > 0) return standard
 
   const yearKey = detectYearKeyFromRows(rows, yearFieldJimu) ?? yearFieldJimu
-  const recorteKey =
+  let recorteKey =
     detectRecorteKeyFromRows(rows, recorteFieldJimu) ?? recorteFieldJimu
 
-  if (!yearKey || !recorteKey) return []
+  if (!yearKey) return []
 
+  let series = buildSeriesFromKeys(rows, yearKey, recorteKey)
+  if (series.length > 0) return series
+
+  if (fields?.length) {
+    for (const f of getRecorteCandidateFields(fields, yearFieldJimu)) {
+      const altKey =
+        detectRecorteKeyFromRows(rows, f.jimuName) ?? f.jimuName
+      series = buildSeriesFromKeys(rows, yearKey, altKey)
+      if (series.length > 0) return series
+    }
+  }
+
+  return series
+}
+
+function buildSeriesFromKeys (
+  rows: Record<string, unknown>[],
+  yearKey: string,
+  recorteKey: string
+): YearValueRow[] {
   const series: YearValueRow[] = []
   for (const row of rows) {
     const year = parseYear(row[yearKey])
@@ -709,7 +758,7 @@ async function fetchRawAttributeRowsFromLayer (
   }
 }
 
-function attributeRowsScore (
+export function attributeRowsScore (
   rows: Record<string, unknown>[]
 ): number {
   if (!rows.length) return 0
@@ -743,6 +792,9 @@ export async function fetchProdesAttributeRows (
 
   candidates.push(await fetchRawAttributeRowsFromLayer(ds))
 
+  const portalRows = await fetchViaPortalRest(ds)
+  if (portalRows.length) candidates.push(portalRows)
+
   const restRows = await fetchViaArcgisRest(ds)
   if (restRows.length) candidates.push(restRows)
 
@@ -769,6 +821,44 @@ export async function fetchProdesAttributeRows (
     if (!best.length) return cur
     return attributeRowsScore(cur) > attributeRowsScore(best) ? cur : best
   }, [] as Record<string, unknown>[])
+}
+
+const RETRY_DELAYS_MS = [0, 400, 800, 1200, 2000, 3000, 4500]
+
+/**
+ * Tenta várias vezes até obter linhas com colunas de dados (não só OBJECTID).
+ */
+export async function forceLoadProdesRows (
+  dataSource: unknown,
+  options: FetchLayerRecordsOptions & { widgetId?: string }
+): Promise<Record<string, unknown>[]> {
+  for (const delay of RETRY_DELAYS_MS) {
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+
+    const rows = await fetchProdesAttributeRows(dataSource, {
+      ...options,
+      forceQuery: true
+    })
+
+    if (!options.yearFieldJimu || !options.recorteFieldJimu) {
+      if (attributeRowsScore(rows) > 1) return rows
+      continue
+    }
+
+    const series = buildYearSeriesFromAttributeRows(
+      rows,
+      options.yearFieldJimu,
+      options.recorteFieldJimu,
+      options.fields
+    )
+    if (series.length > 0) return rows
+
+    if (attributeRowsScore(rows) > 1) return rows
+  }
+
+  return fetchProdesAttributeRows(dataSource, { ...options, forceQuery: true })
 }
 
 /** Carrega todos os registros da camada (tabela ano × recortes). */

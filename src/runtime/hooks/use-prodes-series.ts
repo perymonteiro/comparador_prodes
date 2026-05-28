@@ -5,9 +5,10 @@ import {
   DataSourceStatus
 } from 'jimu-core'
 import {
+  attributeRowsScore,
   buildYearSeriesFromAttributeRows,
   detectYearField,
-  fetchProdesAttributeRows,
+  forceLoadProdesRows,
   schemaToFieldList,
   type YearValueRow
 } from '../../utils/prodes-table'
@@ -18,7 +19,8 @@ import {
 } from '../../utils/data-source'
 import {
   MSG_EXTRACT_FAILED,
-  MSG_LOAD_FAILED
+  MSG_LOAD_FAILED,
+  MSG_LOADING_TABLE
 } from '../../constants'
 
 export interface UseProdesSeriesParams {
@@ -39,7 +41,11 @@ export function useProdesSeries ({
   )
   const [series, setSeries] = React.useState<YearValueRow[]>([])
   const [loading, setLoading] = React.useState(false)
+  const [loadingMessage, setLoadingMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [dsInfoVersion, setDsInfoVersion] = React.useState<number | undefined>(
+    undefined
+  )
 
   const effectiveYearField = yearField ?? detectYearField(fieldList)
 
@@ -64,6 +70,7 @@ export function useProdesSeries ({
     if (!isProdesDataReady(dsStatus)) return
 
     setLoading(true)
+    setLoadingMessage(MSG_LOADING_TABLE)
     setError(null)
     const fetchOpts = {
       yearFieldJimu: effectiveYearField,
@@ -73,42 +80,57 @@ export function useProdesSeries ({
     }
 
     try {
-      let rows = await fetchProdesAttributeRows(main, fetchOpts)
-      let built = buildYearSeriesFromAttributeRows(
+      const rows = await forceLoadProdesRows(main, fetchOpts)
+      const built = buildYearSeriesFromAttributeRows(
         rows,
         effectiveYearField,
         recorteField,
         fieldList
       )
 
-      if (rows.length > 0 && built.length === 0) {
-        rows = await fetchProdesAttributeRows(main, { ...fetchOpts, forceQuery: true })
-        built = buildYearSeriesFromAttributeRows(
-          rows,
-          effectiveYearField,
-          recorteField,
-          fieldList
-        )
-      }
-
       setSeries(built)
 
-      if (rows.length > 0 && built.length === 0) {
-        setError(MSG_EXTRACT_FAILED)
+      if (built.length === 0) {
+        if (rows.length === 0) {
+          setError(MSG_LOAD_FAILED)
+        } else if (attributeRowsScore(rows) <= 1) {
+          setError(MSG_LOAD_FAILED)
+        } else {
+          setError(MSG_EXTRACT_FAILED)
+        }
       }
     } catch {
       setError(MSG_LOAD_FAILED)
       setSeries([])
     } finally {
       setLoading(false)
+      setLoadingMessage(null)
     }
   }, [dsRef, dsStatus, effectiveYearField, fieldList, recorteField, widgetId])
+
+  const handleDataSourceInfoChange = React.useCallback(
+    (info: { status?: DataSourceStatus; version?: number }) => {
+      setDsStatus(info?.status)
+      if (info?.version != null) {
+        setDsInfoVersion(info.version)
+      }
+    },
+    []
+  )
 
   React.useEffect(() => {
     if (!recorteField || !effectiveYearField || !dsRef) return
     if (!isProdesDataReady(dsStatus)) return
     loadSeries()
-  }, [recorteField, effectiveYearField, dsRef, dsStatus, fieldList, loadSeries])
+  }, [
+    recorteField,
+    effectiveYearField,
+    dsRef,
+    dsStatus,
+    dsInfoVersion,
+    fieldList,
+    loadSeries
+  ])
 
   const waitingForLayer =
     !dsRef ||
@@ -119,10 +141,11 @@ export function useProdesSeries ({
   return {
     series,
     loading,
+    loadingMessage,
     error,
     handleDataSourceReady,
+    handleDataSourceInfoChange,
     applySchema,
-    setDsStatus,
     waitingForLayer
   }
 }
