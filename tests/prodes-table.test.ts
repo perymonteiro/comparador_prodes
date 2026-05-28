@@ -3,6 +3,7 @@ import {
   buildYearSeriesFromRecorteRows,
   readAttributeFlexible,
   readRecordValue,
+  getPlainAttributes,
   recordHasReadableData,
   calcPercentVariation,
   computeVariation,
@@ -158,6 +159,20 @@ describe('prodes-table utils', () => {
     ]
     const series = buildYearSeries(records, 'ano', 'cerrado', fields as any)
     expect(series).toEqual([{ year: 2010, value: 1551.8 }])
+  })
+
+  it('getPlainAttributes reads flat Jimu getData map (Enterprise)', () => {
+    const rec = {
+      getData: () => ({ ano: 2010, cerrado: '1.551,80', amazonia_legal: 200 })
+    }
+    expect(getPlainAttributes(rec)).toMatchObject({
+      ano: 2010,
+      cerrado: '1.551,80',
+      amazonia_legal: 200
+    })
+    expect(buildYearSeries([rec], 'ano', 'cerrado')).toEqual([
+      { year: 2010, value: 1551.8 }
+    ])
   })
 
   it('recordHasReadableData rejects empty getFieldValue stubs', () => {

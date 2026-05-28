@@ -59,8 +59,14 @@ export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesPar
 
     setLoading(true)
     setError(null)
+    const fetchOpts = {
+      yearFieldJimu: effectiveYearField,
+      recorteFieldJimu: recorteField,
+      fields: fieldList
+    }
+
     try {
-      let records = await fetchLayerRecords(main)
+      let records = await fetchLayerRecords(main, fetchOpts)
       let built = buildYearSeries(
         records,
         effectiveYearField,
@@ -69,7 +75,7 @@ export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesPar
       )
 
       if (records.length > 0 && built.length === 0) {
-        const forced = await fetchLayerRecords(main, { forceQuery: true })
+        const forced = await fetchLayerRecords(main, { ...fetchOpts, forceQuery: true })
         if (forced.length) {
           records = forced
           built = buildYearSeries(

@@ -3,6 +3,7 @@ import {
   type IMDataSourceSchema,
   JimuFieldType,
   EsriFieldType,
+  QueryScope,
   type DataRecord
 } from 'jimu-core'
 
@@ -211,6 +212,15 @@ function toPlainObject (value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 
+const GET_DATA_META_KEYS = new Set([
+  'attributes',
+  'feature',
+  'geometry',
+  'centroid',
+  'aggregateGeometries',
+  'symbol'
+])
+
 /** Extrai o dicionário de atributos de um registro (vários formatos do Jimu/ArcGIS). */
 export function getPlainAttributes (rec: RecordLike): Record<string, unknown> {
   const merged: Record<string, unknown> = {}
@@ -222,8 +232,14 @@ export function getPlainAttributes (rec: RecordLike): Record<string, unknown> {
 
   if ('getData' in rec && typeof rec.getData === 'function') {
     const data = rec.getData()
-    merge(data?.attributes)
-    merge(data?.feature?.attributes)
+    const plain = toPlainObject(data)
+    merge(plain.attributes as Record<string, unknown> | undefined)
+    merge(plain.feature?.attributes as Record<string, unknown> | undefined)
+    // Jimu DataRecord: getData() costuma ser mapa plano { jimuFieldName: valor }
+    for (const [key, value] of Object.entries(plain)) {
+      if (GET_DATA_META_KEYS.has(key)) continue
+      if (value !== undefined) merged[key] = value
+    }
   }
 
   if ('feature' in rec && rec.feature?.attributes) {
@@ -345,26 +361,70 @@ export function readAttributeFlexible (
 }
 
 type QueriableLayer = {
-  query?: (q: object) => Promise<{ records?: DataRecord[] }>
-  loadAll?: (q: object) => Promise<DataRecord[]>
+  query?: (q: object, options?: { scope?: QueryScope }) => Promise<{ records?: DataRecord[] }>
+  load?: (q: object, options?: { scope?: QueryScope }) => Promise<DataRecord[]>
+  loadAll?: (
+    q: object,
+    signal?: AbortSignal,
+    progressCallback?: unknown,
+    options?: { scope?: QueryScope }
+  ) => Promise<DataRecord[]>
   getAllLoadedRecords?: () => DataRecord[]
   getRecords?: () => DataRecord[]
+  layer?: { queryFeatures?: (q: object) => Promise<{ features?: unknown[] }> }
+  buildRecord?: (feature: unknown) => DataRecord
 }
 
-const queryParams = {
-  outFields: ['*'],
+const queryOptions = { scope: QueryScope.InAllData }
+
+const buildQueryParams = (outFields: string[] = ['*']) => ({
+  where: '1=1',
+  outFields,
   returnGeometry: false,
-  pageSize: 2000
-}
+  pageSize: 2000,
+  disableClientQuery: true
+})
 
 function recordsAreReadable (records: DataRecord[]): boolean {
   return records.length > 0 && records.some(recordHasReadableData)
 }
 
-async function queryAllRecords (ds: QueriableLayer): Promise<DataRecord[]> {
+async function queryViaJsapiLayer (ds: QueriableLayer): Promise<DataRecord[]> {
+  const layer = ds.layer
+  if (!layer?.queryFeatures || typeof ds.buildRecord !== 'function') return []
+
+  try {
+    const result = await layer.queryFeatures({
+      where: '1=1',
+      outFields: ['*'],
+      returnGeometry: false,
+      num: 2000
+    })
+    const features = result?.features ?? []
+    return features.map((f) => ds.buildRecord!(f))
+  } catch {
+    return []
+  }
+}
+
+async function queryAllRecords (
+  ds: QueriableLayer,
+  outFields: string[] = ['*']
+): Promise<DataRecord[]> {
+  const params = buildQueryParams(outFields)
+
+  if (typeof ds?.load === 'function') {
+    try {
+      const records = await ds.load(params, queryOptions)
+      if (records?.length) return records
+    } catch {
+      // tenta próximo método
+    }
+  }
+
   if (typeof ds?.loadAll === 'function') {
     try {
-      const records = await ds.loadAll(queryParams)
+      const records = await ds.loadAll(params, undefined, undefined, queryOptions)
       if (records?.length) return records
     } catch {
       // tenta query abaixo
@@ -373,19 +433,33 @@ async function queryAllRecords (ds: QueriableLayer): Promise<DataRecord[]> {
 
   if (typeof ds?.query === 'function') {
     try {
-      const result = await ds.query(queryParams)
+      const result = await ds.query(params, queryOptions)
       return result?.records ?? []
     } catch {
-      return []
+      // tenta JS API
     }
   }
 
-  return []
+  return queryViaJsapiLayer(ds)
 }
 
 export interface FetchLayerRecordsOptions {
   /** Ignora cache do mapa e força query/loadAll (útil no Enterprise). */
   forceQuery?: boolean
+  yearFieldJimu?: string
+  recorteFieldJimu?: string
+  fields?: IMFieldSchema[]
+}
+
+function resolveOutFields (
+  yearFieldJimu?: string,
+  recorteFieldJimu?: string,
+  fields?: IMFieldSchema[]
+): string[] {
+  if (!fields?.length || !yearFieldJimu || !recorteFieldJimu) return ['*']
+  const keys = resolveAttributeKeys(fields, yearFieldJimu, recorteFieldJimu)
+  if (!keys) return ['*']
+  return ['*', keys.yearKey, keys.recorteKey]
 }
 
 /** Carrega todos os registros da camada (tabela ano × recortes). */
@@ -395,12 +469,17 @@ export async function fetchLayerRecords (
 ): Promise<DataRecord[]> {
   const ds = dataSource as QueriableLayer
   const cached = ds.getAllLoadedRecords?.() ?? ds.getRecords?.() ?? []
+  const outFields = resolveOutFields(
+    options?.yearFieldJimu,
+    options?.recorteFieldJimu,
+    options?.fields
+  )
 
   if (!options?.forceQuery && recordsAreReadable(cached)) {
     return cached
   }
 
-  const queried = await queryAllRecords(ds)
+  const queried = await queryAllRecords(ds, outFields)
   if (recordsAreReadable(queried)) return queried
   if (queried.length) return queried
 
