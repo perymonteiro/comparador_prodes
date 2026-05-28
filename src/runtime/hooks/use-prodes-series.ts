@@ -14,7 +14,7 @@ import {
 import {
   ensureDataSourceSchema,
   getQueryableDataSource,
-  isQueryableStatus
+  isProdesDataReady
 } from '../../utils/data-source'
 import {
   MSG_EXTRACT_FAILED,
@@ -24,9 +24,14 @@ import {
 export interface UseProdesSeriesParams {
   recorteField?: string
   yearField?: string
+  widgetId?: string
 }
 
-export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesParams) {
+export function useProdesSeries ({
+  recorteField,
+  yearField,
+  widgetId
+}: UseProdesSeriesParams) {
   const [dsRef, setDsRef] = React.useState<DataSource | null>(null)
   const [dsStatus, setDsStatus] = React.useState<DataSourceStatus | undefined>(undefined)
   const [fieldList, setFieldList] = React.useState(
@@ -56,14 +61,15 @@ export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesPar
       return
     }
 
-    if (!isQueryableStatus(dsStatus)) return
+    if (!isProdesDataReady(dsStatus)) return
 
     setLoading(true)
     setError(null)
     const fetchOpts = {
       yearFieldJimu: effectiveYearField,
       recorteFieldJimu: recorteField,
-      fields: fieldList
+      fields: fieldList,
+      widgetId
     }
 
     try {
@@ -96,15 +102,19 @@ export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesPar
     } finally {
       setLoading(false)
     }
-  }, [dsRef, dsStatus, effectiveYearField, fieldList, recorteField])
+  }, [dsRef, dsStatus, effectiveYearField, fieldList, recorteField, widgetId])
 
   React.useEffect(() => {
     if (!recorteField || !effectiveYearField || !dsRef) return
-    if (!isQueryableStatus(dsStatus)) return
+    if (!isProdesDataReady(dsStatus)) return
     loadSeries()
   }, [recorteField, effectiveYearField, dsRef, dsStatus, fieldList, loadSeries])
 
-  const waitingForLayer = !dsRef || dsStatus === DataSourceStatus.Loading
+  const waitingForLayer =
+    !dsRef ||
+    dsStatus === DataSourceStatus.Loading ||
+    dsStatus === DataSourceStatus.NotReady ||
+    dsStatus === DataSourceStatus.Unloaded
 
   return {
     series,

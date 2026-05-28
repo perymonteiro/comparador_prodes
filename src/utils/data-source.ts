@@ -9,10 +9,13 @@ type DataSourceWithMain = DataSource & {
   getSchema?: () => IMDataSourceSchema
 }
 
+/** Antes do query do DataSourceComponent terminar, registros costumam vir sem atributos. */
+export const isProdesDataReady = (status?: DataSourceStatus): boolean =>
+  status === DataSourceStatus.Loaded
+
 export const isQueryableStatus = (status?: DataSourceStatus): boolean =>
   status === DataSourceStatus.Loaded ||
-  status === DataSourceStatus.Unloaded ||
-  status === DataSourceStatus.NotReady
+  status === DataSourceStatus.Loading
 
 export const getMainDataSource = (ds: DataSource | null): DataSource | null => {
   if (!ds) return null

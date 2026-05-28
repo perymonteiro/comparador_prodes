@@ -3,7 +3,8 @@ import {
   React,
   jsx,
   type AllWidgetProps,
-  DataSourceComponent
+  DataSourceComponent,
+  QueryScope
 } from 'jimu-core'
 import { Loading, Label, Button } from 'jimu-ui'
 import type { IMConfig } from '../config'
@@ -14,7 +15,8 @@ import {
   MSG_NOT_CONFIGURED,
   MSG_NO_DATA,
   PLACEHOLDER_PERIODO_FINAL,
-  PLACEHOLDER_PERIODO_INICIAL
+  PLACEHOLDER_PERIODO_INICIAL,
+  PRODES_TABLE_QUERY
 } from '../constants'
 import { VariationResultPanel } from './components/variation-result'
 import { useProdesSeries } from './hooks/use-prodes-series'
@@ -35,7 +37,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     applySchema,
     setDsStatus,
     waitingForLayer
-  } = useProdesSeries({ recorteField, yearField })
+  } = useProdesSeries({ recorteField, yearField, widgetId: props.id })
 
   const availableYears = React.useMemo(
     () => series.map((r) => r.year),
@@ -75,6 +77,9 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       <DataSourceComponent
         useDataSource={useDs}
         widgetId={props.id}
+        query={PRODES_TABLE_QUERY}
+        queryScope={QueryScope.InAllData}
+        queryAll
         onDataSourceCreated={handleDataSourceReady}
         onDataSourceSchemaChange={(schema) => {
           applySchema(schema)

@@ -1,4 +1,14 @@
+import { Immutable } from 'jimu-core'
+
 export const AREA_UNIT = 'km²'
+
+/** Consulta padrão: todos os registros da tabela PRODES (padrão EXB). */
+export const PRODES_TABLE_QUERY = Immutable({
+  where: '1=1',
+  outFields: ['*'],
+  returnGeometry: false,
+  pageSize: 2000
+})
 
 export const LABEL_PERIODO_INICIAL = 'Ano inicial ou período inicial'
 export const LABEL_PERIODO_FINAL = 'Ano final ou período final'

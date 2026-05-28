@@ -431,7 +431,10 @@ type QueriableLayer = {
   buildRecord?: (feature: unknown) => DataRecord
 }
 
-const queryOptions = { scope: QueryScope.InAllData }
+const buildQueryOptions = (widgetId?: string) => ({
+  scope: QueryScope.InAllData,
+  ...(widgetId ? { widgetId } : {})
+})
 
 const buildQueryParams = (
   outFields: string[] = ['*'],
@@ -476,12 +479,39 @@ async function queryViaJsapiLayer (ds: QueriableLayer): Promise<DataRecord[]> {
   }
 }
 
+async function fetchViaArcgisRest (
+  ds: { url?: string }
+): Promise<Record<string, unknown>[]> {
+  if (!ds.url) return []
+  try {
+    const { queryFeatures } = await import('@esri/arcgis-rest-feature-service')
+    const res = await queryFeatures({
+      url: ds.url,
+      where: '1=1',
+      outFields: ['*'],
+      returnGeometry: false
+    })
+    const features =
+      res && typeof res === 'object' && 'features' in res
+        ? (res as { features?: Array<{ attributes?: Record<string, unknown> }> })
+            .features ?? []
+        : []
+    return features
+      .map((f) => ({ ...(f.attributes ?? {}) }))
+      .filter((a) => Object.keys(a).length > 0)
+  } catch {
+    return []
+  }
+}
+
 async function runQueryableMethods (
   ds: QueriableLayer,
   outFields: string[],
-  disableClientQuery: boolean
+  disableClientQuery: boolean,
+  widgetId?: string
 ): Promise<DataRecord[]> {
   const params = buildQueryParams(outFields, disableClientQuery)
+  const queryOptions = buildQueryOptions(widgetId)
 
   if (typeof ds?.load === 'function') {
     try {
@@ -523,12 +553,13 @@ async function runQueryableMethods (
 
 async function queryAllRecords (
   ds: QueriableLayer,
-  outFields: string[] = ['*']
+  outFields: string[] = ['*'],
+  widgetId?: string
 ): Promise<DataRecord[]> {
-  let records = await runQueryableMethods(ds, outFields, false)
+  let records = await runQueryableMethods(ds, outFields, false, widgetId)
   if (recordsAreReadable(records)) return records
 
-  records = await runQueryableMethods(ds, outFields, true)
+  records = await runQueryableMethods(ds, outFields, true, widgetId)
   if (recordsAreReadable(records)) return records
 
   return records
@@ -540,6 +571,8 @@ export interface FetchLayerRecordsOptions {
   yearFieldJimu?: string
   recorteFieldJimu?: string
   fields?: IMFieldSchema[]
+  /** ID da widget para autenticação na consulta Jimu. */
+  widgetId?: string
 }
 
 function resolveOutFields (
@@ -690,33 +723,32 @@ function attributeRowsScore (
  * Carrega linhas da tabela PRODES priorizando atributos brutos da camada
  * (mesma fonte da tabela do Portal).
  */
+function recordsToAttributeRows (records: DataRecord[]): Record<string, unknown>[] {
+  return records
+    .map((r) => getPlainAttributes(r))
+    .filter((a) => Object.keys(a).length > 0)
+}
+
 export async function fetchProdesAttributeRows (
   dataSource: unknown,
   options?: FetchLayerRecordsOptions
 ): Promise<Record<string, unknown>[]> {
-  const ds = dataSource as QueriableLayer
+  const ds = dataSource as QueriableLayer & { url?: string }
   const candidates: Record<string, unknown>[][] = []
+
+  const loaded = ds.getRecords?.() ?? ds.getAllLoadedRecords?.() ?? []
+  if (loaded.length) {
+    candidates.push(recordsToAttributeRows(loaded))
+  }
 
   candidates.push(await fetchRawAttributeRowsFromLayer(ds))
 
-  if (!options?.forceQuery) {
-    const cached = ds.getAllLoadedRecords?.() ?? ds.getRecords?.() ?? []
-    if (cached.length) {
-      candidates.push(
-        cached
-          .map((r) => getPlainAttributes(r))
-          .filter((a) => Object.keys(a).length > 0)
-      )
-    }
-  }
+  const restRows = await fetchViaArcgisRest(ds)
+  if (restRows.length) candidates.push(restRows)
 
   const records = await fetchLayerRecords(dataSource, options)
   if (records.length) {
-    candidates.push(
-      records
-        .map((r) => getPlainAttributes(r))
-        .filter((a) => Object.keys(a).length > 0)
-    )
+    candidates.push(recordsToAttributeRows(records))
   }
 
   if (options?.yearFieldJimu && options?.recorteFieldJimu) {
@@ -756,7 +788,7 @@ export async function fetchLayerRecords (
     return cached
   }
 
-  const queried = await queryAllRecords(ds, outFields)
+  const queried = await queryAllRecords(ds, outFields, options?.widgetId)
   if (recordsAreReadable(queried)) return queried
   if (queried.length) return queried
 
