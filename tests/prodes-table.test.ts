@@ -75,6 +75,35 @@ describe('prodes-table utils', () => {
     expect(parseYear('x')).toBe(null)
   })
 
+  it('parseYear interprets ArcGIS pt-BR year display (2.001 = 2001)', () => {
+    expect(parseYear(2.001)).toBe(2001)
+    expect(parseYear(2.011)).toBe(2011)
+    expect(parseYear('2.008')).toBe(2008)
+    expect(parseYear('2.009')).toBe(2009)
+  })
+
+  it('buildYearSeries handles Ano as 2.00x and sparse amazonia_floresta', () => {
+    const fields = [
+      { jimuName: 'ano', name: 'Ano', alias: 'Ano', type: JimuFieldType.Number },
+      {
+        jimuName: 'amazonia_floresta',
+        name: 'amazonia_floresta',
+        type: JimuFieldType.Number
+      }
+    ]
+    const records = [
+      { attributes: { Ano: 2.001, amazonia_floresta: null } },
+      { attributes: { Ano: 2.007, amazonia_floresta: null } },
+      { attributes: { Ano: 2.008, amazonia_floresta: '12.418,65' } },
+      { attributes: { Ano: 2.009, amazonia_floresta: '5.886,84' } }
+    ]
+    const series = buildYearSeries(records, 'ano', 'amazonia_floresta', fields as any)
+    expect(series).toEqual([
+      { year: 2008, value: 12418.65 },
+      { year: 2009, value: 5886.84 }
+    ])
+  })
+
   it('detectYearField prefers ano from anexo schema', () => {
     expect(detectYearField(anexoFields as any)).toBe('ano')
   })

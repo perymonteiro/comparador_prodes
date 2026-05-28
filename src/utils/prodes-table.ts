@@ -45,16 +45,45 @@ export function parseNumericValue (value: unknown): number | null {
   return null
 }
 
+/** Converte número exibido no ArcGIS em pt-BR (ex.: 2.001 → 2001). */
+function normalizeYearNumber (n: number): number | null {
+  if (!Number.isFinite(n)) return null
+
+  if (n >= 1985 && n <= 2035 && Math.abs(n - Math.round(n)) < 0.001) {
+    return Math.round(n)
+  }
+
+  // Tabela PRODES no Portal: coluna Ano como 2.001, 2.011 (milhar com ponto)
+  if (n >= 1.985 && n <= 2.035) {
+    const y = Math.round(n * 1000)
+    if (y >= 1985 && y <= 2035) return y
+  }
+
+  const truncated = Math.trunc(n)
+  if (truncated >= 1985 && truncated <= 2035) return truncated
+  return null
+}
+
 export function parseYear (value: unknown): number | null {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.getFullYear()
   }
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return normalizeYearNumber(value)
+  }
   if (typeof value === 'string') {
     const s = value.trim()
     if (!s) return null
-    const n = Number(s)
-    if (Number.isFinite(n)) return Math.trunc(n)
+
+    const brThousands = s.match(/^(\d{1,2})\.(\d{3})$/)
+    if (brThousands) {
+      const y = Number(brThousands[1] + brThousands[2])
+      if (y >= 1985 && y <= 2035) return y
+    }
+
+    const n = Number(s.replace(',', '.'))
+    if (Number.isFinite(n)) return normalizeYearNumber(n)
+
     const m = s.match(/\b(19|20)\d{2}\b/)
     if (m) return Number(m[0])
   }
