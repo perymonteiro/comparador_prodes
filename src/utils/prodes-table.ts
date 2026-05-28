@@ -237,11 +237,41 @@ export function getPlainAttributes (rec: RecordLike): Record<string, unknown> {
   return merged
 }
 
-function recordHasReadableData (rec: RecordLike): boolean {
+function attributeHasUsableValue (value: unknown): boolean {
+  if (isEmptyCell(value)) return false
+  if (typeof value === 'object') return false
+  return true
+}
+
+/** Verifica se o registro expõe atributos ou getFieldValue com dados reais (não só método vazio). */
+export function recordHasReadableData (rec: RecordLike): boolean {
+  const attrs = getPlainAttributes(rec)
+  const usableKeys = Object.keys(attrs).filter((key) => {
+    if (/^(objectid|globalid|shape|geometry)$/i.test(key)) return false
+    return attributeHasUsableValue(attrs[key])
+  })
+  if (usableKeys.length > 0) return true
+
   if ('getFieldValue' in rec && typeof rec.getFieldValue === 'function') {
-    return true
+    const probes = [
+      'ano',
+      'year',
+      'ANO',
+      'Year',
+      'exercicio',
+      'Exercicio'
+    ]
+    for (const name of probes) {
+      try {
+        const v = rec.getFieldValue!(name)
+        if (attributeHasUsableValue(v)) return true
+      } catch {
+        // tenta próximo
+      }
+    }
   }
-  return Object.keys(getPlainAttributes(rec)).length > 0
+
+  return false
 }
 
 /** Lê valor pelo API do Jimu (`getFieldValue`) e, em seguida, pelos atributos brutos. */
@@ -331,17 +361,10 @@ function recordsAreReadable (records: DataRecord[]): boolean {
   return records.length > 0 && records.some(recordHasReadableData)
 }
 
-/** Carrega todos os registros da camada (tabela ano × recortes). */
-export async function fetchLayerRecords (dataSource: unknown): Promise<DataRecord[]> {
-  const ds = dataSource as QueriableLayer
-
-  const cached = ds.getAllLoadedRecords?.() ?? ds.getRecords?.() ?? []
-  if (recordsAreReadable(cached)) return cached
-
+async function queryAllRecords (ds: QueriableLayer): Promise<DataRecord[]> {
   if (typeof ds?.loadAll === 'function') {
     try {
       const records = await ds.loadAll(queryParams)
-      if (recordsAreReadable(records)) return records
       if (records?.length) return records
     } catch {
       // tenta query abaixo
@@ -351,15 +374,38 @@ export async function fetchLayerRecords (dataSource: unknown): Promise<DataRecor
   if (typeof ds?.query === 'function') {
     try {
       const result = await ds.query(queryParams)
-      const records = result?.records ?? []
-      if (recordsAreReadable(records)) return records
-      if (records.length) return records
+      return result?.records ?? []
     } catch {
-      return cached
+      return []
     }
   }
 
-  return cached
+  return []
+}
+
+export interface FetchLayerRecordsOptions {
+  /** Ignora cache do mapa e força query/loadAll (útil no Enterprise). */
+  forceQuery?: boolean
+}
+
+/** Carrega todos os registros da camada (tabela ano × recortes). */
+export async function fetchLayerRecords (
+  dataSource: unknown,
+  options?: FetchLayerRecordsOptions
+): Promise<DataRecord[]> {
+  const ds = dataSource as QueriableLayer
+  const cached = ds.getAllLoadedRecords?.() ?? ds.getRecords?.() ?? []
+
+  if (!options?.forceQuery && recordsAreReadable(cached)) {
+    return cached
+  }
+
+  const queried = await queryAllRecords(ds)
+  if (recordsAreReadable(queried)) return queried
+  if (queried.length) return queried
+
+  if (!options?.forceQuery) return cached
+  return queried.length ? queried : cached
 }
 
 function normalizeRecorteToken (value: string): string {

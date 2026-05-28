@@ -3,6 +3,7 @@ import {
   buildYearSeriesFromRecorteRows,
   readAttributeFlexible,
   readRecordValue,
+  recordHasReadableData,
   calcPercentVariation,
   computeVariation,
   areConsecutiveYears,
@@ -157,6 +158,20 @@ describe('prodes-table utils', () => {
     ]
     const series = buildYearSeries(records, 'ano', 'cerrado', fields as any)
     expect(series).toEqual([{ year: 2010, value: 1551.8 }])
+  })
+
+  it('recordHasReadableData rejects empty getFieldValue stubs', () => {
+    const stub = {
+      getFieldValue: () => undefined,
+      getData: () => ({ attributes: {} })
+    }
+    expect(recordHasReadableData(stub)).toBe(false)
+    expect(
+      recordHasReadableData({
+        getFieldValue: (name: string) => (name === 'ano' ? 2020 : undefined),
+        getData: () => ({ attributes: {} })
+      })
+    ).toBe(true)
   })
 
   it('readRecordValue uses getFieldValue when attributes are empty', () => {
