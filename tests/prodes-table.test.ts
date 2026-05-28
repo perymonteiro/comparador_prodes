@@ -2,6 +2,8 @@ import {
   buildYearSeries,
   buildYearSeriesFromRecorteRows,
   buildYearSeriesInferred,
+  buildYearSeriesFromAttributeRows,
+  detectYearKeyFromRows,
   readAttributeFlexible,
   readRecordValue,
   getPlainAttributes,
@@ -80,6 +82,32 @@ describe('prodes-table utils', () => {
     expect(parseYear(2.011)).toBe(2011)
     expect(parseYear('2.008')).toBe(2008)
     expect(parseYear('2.009')).toBe(2009)
+  })
+
+  it('detectYearKeyFromRows finds Ano column from pt-BR year values', () => {
+    const rows = [
+      { Ano: 2.001, cerrado: 1 },
+      { Ano: 2.002, cerrado: 2 },
+      { Ano: 2.003, cerrado: 3 }
+    ]
+    expect(detectYearKeyFromRows(rows, 'ano')).toBe('Ano')
+  })
+
+  it('buildYearSeriesFromAttributeRows reads raw REST attribute rows', () => {
+    const rows = [
+      { Ano: 2001, amazonia_floresta: null },
+      { Ano: 2008, amazonia_floresta: 12418.65 },
+      { Ano: 2009, amazonia_floresta: 5886.84 }
+    ]
+    const series = buildYearSeriesFromAttributeRows(
+      rows,
+      'ano',
+      'amazonia_floresta'
+    )
+    expect(series).toEqual([
+      { year: 2008, value: 12418.65 },
+      { year: 2009, value: 5886.84 }
+    ])
   })
 
   it('buildYearSeries handles Ano as 2.00x and sparse amazonia_floresta', () => {

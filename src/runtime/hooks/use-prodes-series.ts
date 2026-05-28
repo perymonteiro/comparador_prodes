@@ -5,9 +5,9 @@ import {
   DataSourceStatus
 } from 'jimu-core'
 import {
-  buildYearSeries,
+  buildYearSeriesFromAttributeRows,
   detectYearField,
-  fetchLayerRecords,
+  fetchProdesAttributeRows,
   schemaToFieldList,
   type YearValueRow
 } from '../../utils/prodes-table'
@@ -67,30 +67,27 @@ export function useProdesSeries ({ recorteField, yearField }: UseProdesSeriesPar
     }
 
     try {
-      let records = await fetchLayerRecords(main, fetchOpts)
-      let built = buildYearSeries(
-        records,
+      let rows = await fetchProdesAttributeRows(main, fetchOpts)
+      let built = buildYearSeriesFromAttributeRows(
+        rows,
         effectiveYearField,
         recorteField,
         fieldList
       )
 
-      if (records.length > 0 && built.length === 0) {
-        const forced = await fetchLayerRecords(main, { ...fetchOpts, forceQuery: true })
-        if (forced.length) {
-          records = forced
-          built = buildYearSeries(
-            forced,
-            effectiveYearField,
-            recorteField,
-            fieldList
-          )
-        }
+      if (rows.length > 0 && built.length === 0) {
+        rows = await fetchProdesAttributeRows(main, { ...fetchOpts, forceQuery: true })
+        built = buildYearSeriesFromAttributeRows(
+          rows,
+          effectiveYearField,
+          recorteField,
+          fieldList
+        )
       }
 
       setSeries(built)
 
-      if (records.length > 0 && built.length === 0) {
+      if (rows.length > 0 && built.length === 0) {
         setError(MSG_EXTRACT_FAILED)
       }
     } catch {

@@ -553,6 +553,192 @@ function resolveOutFields (
   return ['*', keys.yearKey, keys.recorteKey]
 }
 
+/** Detecta coluna de ano pelos valores reais (ex.: Ano = 2.001, 2001). */
+export function detectYearKeyFromRows (
+  rows: Record<string, unknown>[],
+  hint?: string
+): string | null {
+  if (!rows.length) return null
+
+  const keys = new Set<string>()
+  for (const row of rows.slice(0, 50)) {
+    Object.keys(row).forEach((k) => keys.add(k))
+  }
+
+  if (hint) {
+    const match = [...keys].find((k) => k.toLowerCase() === hint.toLowerCase())
+    if (match) return match
+  }
+
+  let bestKey: string | null = null
+  let bestScore = 0
+  for (const key of keys) {
+    if (/^(objectid|globalid|shape|fid)$/i.test(key)) continue
+    let score = 0
+    for (const row of rows) {
+      const y = parseYear(row[key])
+      if (y != null && y >= 1985 && y <= 2035) score++
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestKey = key
+    }
+  }
+  return bestScore > 0 ? bestKey : null
+}
+
+export function detectRecorteKeyFromRows (
+  rows: Record<string, unknown>[],
+  recorteHint: string
+): string | null {
+  if (!rows.length) return null
+  const keys = new Set<string>()
+  for (const row of rows.slice(0, 5)) {
+    Object.keys(row).forEach((k) => keys.add(k))
+  }
+  const exact = [...keys].find(
+    (k) => k.toLowerCase() === recorteHint.toLowerCase()
+  )
+  if (exact) return exact
+  return (
+    [...keys].find(
+      (k) =>
+        normalizeRecorteToken(k) === normalizeRecorteToken(recorteHint)
+    ) ?? null
+  )
+}
+
+/** Monta série a partir de atributos brutos (REST / queryFeatures). */
+export function buildYearSeriesFromAttributeRows (
+  rows: Record<string, unknown>[],
+  yearFieldJimu: string,
+  recorteFieldJimu: string,
+  fields?: IMFieldSchema[]
+): YearValueRow[] {
+  if (!rows.length) return []
+
+  const asRecords = rows.map((attributes) => ({ attributes }))
+  const standard = buildYearSeries(
+    asRecords,
+    yearFieldJimu,
+    recorteFieldJimu,
+    fields
+  )
+  if (standard.length > 0) return standard
+
+  const yearKey = detectYearKeyFromRows(rows, yearFieldJimu) ?? yearFieldJimu
+  const recorteKey =
+    detectRecorteKeyFromRows(rows, recorteFieldJimu) ?? recorteFieldJimu
+
+  if (!yearKey || !recorteKey) return []
+
+  const series: YearValueRow[] = []
+  for (const row of rows) {
+    const year = parseYear(row[yearKey])
+    const value = parseNumericValue(row[recorteKey])
+    if (year == null || value == null) continue
+    series.push({ year, value })
+  }
+  return series.sort((a, b) => a.year - b.year)
+}
+
+async function fetchRawAttributeRowsFromLayer (
+  ds: QueriableLayer
+): Promise<Record<string, unknown>[]> {
+  const layer = ds.layer as {
+    load?: () => Promise<void>
+    loaded?: boolean
+    loadStatus?: string
+    queryFeatures?: (p: object) => Promise<{
+      features?: Array<{ attributes?: Record<string, unknown> }>
+    }>
+  }
+  if (!layer?.queryFeatures) return []
+
+  try {
+    if (
+      typeof layer.load === 'function' &&
+      layer.loadStatus !== 'loaded' &&
+      !layer.loaded
+    ) {
+      await layer.load()
+    }
+    const result = await layer.queryFeatures({
+      where: '1=1',
+      outFields: ['*'],
+      returnGeometry: false
+    })
+    return (result.features ?? [])
+      .map((f) => ({ ...(f.attributes ?? {}) }))
+      .filter((a) => Object.keys(a).length > 0)
+  } catch {
+    return []
+  }
+}
+
+function attributeRowsScore (
+  rows: Record<string, unknown>[]
+): number {
+  if (!rows.length) return 0
+  const sample = rows[0]
+  return Object.keys(sample).filter(
+    (k) => !/^(objectid|globalid|shape|fid)$/i.test(k)
+  ).length
+}
+
+/**
+ * Carrega linhas da tabela PRODES priorizando atributos brutos da camada
+ * (mesma fonte da tabela do Portal).
+ */
+export async function fetchProdesAttributeRows (
+  dataSource: unknown,
+  options?: FetchLayerRecordsOptions
+): Promise<Record<string, unknown>[]> {
+  const ds = dataSource as QueriableLayer
+  const candidates: Record<string, unknown>[][] = []
+
+  candidates.push(await fetchRawAttributeRowsFromLayer(ds))
+
+  if (!options?.forceQuery) {
+    const cached = ds.getAllLoadedRecords?.() ?? ds.getRecords?.() ?? []
+    if (cached.length) {
+      candidates.push(
+        cached
+          .map((r) => getPlainAttributes(r))
+          .filter((a) => Object.keys(a).length > 0)
+      )
+    }
+  }
+
+  const records = await fetchLayerRecords(dataSource, options)
+  if (records.length) {
+    candidates.push(
+      records
+        .map((r) => getPlainAttributes(r))
+        .filter((a) => Object.keys(a).length > 0)
+    )
+  }
+
+  if (options?.yearFieldJimu && options?.recorteFieldJimu) {
+    for (const rows of candidates) {
+      if (!rows.length) continue
+      const series = buildYearSeriesFromAttributeRows(
+        rows,
+        options.yearFieldJimu,
+        options.recorteFieldJimu,
+        options.fields
+      )
+      if (series.length > 0) return rows
+    }
+  }
+
+  return candidates.reduce((best, cur) => {
+    if (!cur.length) return best
+    if (!best.length) return cur
+    return attributeRowsScore(cur) > attributeRowsScore(best) ? cur : best
+  }, [] as Record<string, unknown>[])
+}
+
 /** Carrega todos os registros da camada (tabela ano × recortes). */
 export async function fetchLayerRecords (
   dataSource: unknown,
