@@ -7,7 +7,10 @@ import {
 import {
   attributeRowsScore,
   buildYearSeriesFromAttributeRows,
+  buildYearSeriesFromRecords,
+  describeRowsForExtractError,
   detectYearField,
+  fetchLayerRecords,
   forceLoadProdesRows,
   schemaToFieldList,
   type YearValueRow
@@ -81,12 +84,25 @@ export function useProdesSeries ({
 
     try {
       const rows = await forceLoadProdesRows(main, fetchOpts)
-      const built = buildYearSeriesFromAttributeRows(
+      let built = buildYearSeriesFromAttributeRows(
         rows,
         effectiveYearField,
         recorteField,
         fieldList
       )
+
+      if (built.length === 0 && fieldList.length > 0) {
+        const records = await fetchLayerRecords(main, {
+          ...fetchOpts,
+          forceQuery: true
+        })
+        built = buildYearSeriesFromRecords(
+          records,
+          effectiveYearField,
+          recorteField,
+          fieldList
+        )
+      }
 
       setSeries(built)
 
@@ -96,7 +112,9 @@ export function useProdesSeries ({
         } else if (attributeRowsScore(rows) <= 1) {
           setError(MSG_LOAD_FAILED)
         } else {
-          setError(MSG_EXTRACT_FAILED)
+          setError(
+            MSG_EXTRACT_FAILED + describeRowsForExtractError(rows, recorteField)
+          )
         }
       }
     } catch {

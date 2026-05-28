@@ -706,7 +706,54 @@ export function buildYearSeriesFromAttributeRows (
     }
   }
 
+  const altRecorte = findBestRecorteKeyByNumericFill(rows, yearKey)
+  if (altRecorte && altRecorte !== recorteKey) {
+    series = buildSeriesFromKeys(rows, yearKey, altRecorte)
+    if (series.length > 0) return series
+  }
+
   return series
+}
+
+function findBestRecorteKeyByNumericFill (
+  rows: Record<string, unknown>[],
+  yearKey: string
+): string | null {
+  const keys = new Set<string>()
+  for (const row of rows.slice(0, 50)) {
+    Object.keys(row).forEach((k) => keys.add(k))
+  }
+
+  let best: { key: string; count: number } | null = null
+  for (const key of keys) {
+    if (key.toLowerCase() === yearKey.toLowerCase()) continue
+    if (/^(objectid|globalid|shape|fid)$/i.test(key)) continue
+    let count = 0
+    for (const row of rows) {
+      if (parseNumericValue(row[key]) != null) count++
+    }
+    if (!best || count > best.count) best = { key, count }
+  }
+  return best && best.count > 0 ? best.key : null
+}
+
+/** Resumo das colunas detectadas (ajuda diagnóstico no Enterprise). */
+export function describeRowsForExtractError (
+  rows: Record<string, unknown>[],
+  recorteHint: string
+): string {
+  if (!rows.length) return ''
+  const keys = Object.keys(rows[0]).filter(
+    (k) => !/^(objectid|globalid|shape|fid)$/i.test(k)
+  )
+  const yearKey = detectYearKeyFromRows(rows)
+  const recorteKey = detectRecorteKeyFromRows(rows, recorteHint)
+  const preview = keys.slice(0, 10).join(', ')
+  const suffix = keys.length > 10 ? '…' : ''
+  let msg = ` Colunas na resposta: ${preview}${suffix}.`
+  if (yearKey) msg += ` Coluna de ano: "${yearKey}".`
+  if (recorteKey) msg += ` Coluna do recorte: "${recorteKey}".`
+  return msg
 }
 
 function buildSeriesFromKeys (
@@ -785,15 +832,10 @@ export async function fetchProdesAttributeRows (
   const ds = dataSource as QueriableLayer & { url?: string }
   const candidates: Record<string, unknown>[][] = []
 
-  const loaded = ds.getRecords?.() ?? ds.getAllLoadedRecords?.() ?? []
-  if (loaded.length) {
-    candidates.push(recordsToAttributeRows(loaded))
-  }
-
-  candidates.push(await fetchRawAttributeRowsFromLayer(ds))
-
   const portalRows = await fetchViaPortalRest(ds)
   if (portalRows.length) candidates.push(portalRows)
+
+  candidates.push(await fetchRawAttributeRowsFromLayer(ds))
 
   const restRows = await fetchViaArcgisRest(ds)
   if (restRows.length) candidates.push(restRows)
@@ -803,9 +845,17 @@ export async function fetchProdesAttributeRows (
     candidates.push(recordsToAttributeRows(records))
   }
 
+  const loaded = ds.getRecords?.() ?? ds.getAllLoadedRecords?.() ?? []
+  if (loaded.length) {
+    candidates.push(recordsToAttributeRows(loaded))
+  }
+
   if (options?.yearFieldJimu && options?.recorteFieldJimu) {
-    for (const rows of candidates) {
-      if (!rows.length) continue
+    const ordered = [
+      ...candidates.filter((c) => c.length && attributeRowsScore(c) > 1)
+    ].sort((a, b) => scoreRowsForRecorte(b, options.recorteFieldJimu) - scoreRowsForRecorte(a, options.recorteFieldJimu))
+
+    for (const rows of ordered) {
       const series = buildYearSeriesFromAttributeRows(
         rows,
         options.yearFieldJimu,
@@ -816,11 +866,30 @@ export async function fetchProdesAttributeRows (
     }
   }
 
-  return candidates.reduce((best, cur) => {
-    if (!cur.length) return best
-    if (!best.length) return cur
-    return attributeRowsScore(cur) > attributeRowsScore(best) ? cur : best
-  }, [] as Record<string, unknown>[])
+  const withData = candidates.filter(
+    (c) => c.length && attributeRowsScore(c) > 1
+  )
+  if (!withData.length) {
+    return candidates.find((c) => c.length) ?? []
+  }
+
+  const recorteHint = options?.recorteFieldJimu ?? ''
+  return withData.sort(
+    (a, b) => scoreRowsForRecorte(b, recorteHint) - scoreRowsForRecorte(a, recorteHint)
+  )[0]
+}
+
+/** Quantos valores numéricos preenchidos existem na coluna do recorte. */
+function scoreRowsForRecorte (
+  rows: Record<string, unknown>[],
+  recorteFieldJimu: string
+): number {
+  const key = detectRecorteKeyFromRows(rows, recorteFieldJimu) ?? recorteFieldJimu
+  let score = 0
+  for (const row of rows) {
+    if (parseNumericValue(row[key]) != null) score++
+  }
+  return score
 }
 
 const RETRY_DELAYS_MS = [0, 400, 800, 1200, 2000, 3000, 4500]
@@ -854,8 +923,6 @@ export async function forceLoadProdesRows (
       options.fields
     )
     if (series.length > 0) return rows
-
-    if (attributeRowsScore(rows) > 1) return rows
   }
 
   return fetchProdesAttributeRows(dataSource, { ...options, forceQuery: true })
@@ -1035,6 +1102,21 @@ export function buildYearSeriesInferred (
     series.push({ year, value })
   }
   return series.sort((a, b) => a.year - b.year)
+}
+
+/** Série a partir de DataRecords (getFieldValue / getDataBeforeMapping). */
+export function buildYearSeriesFromRecords (
+  records: DataRecord[],
+  yearFieldJimu: string,
+  recorteFieldJimu: string,
+  fields?: IMFieldSchema[]
+): YearValueRow[] {
+  return buildYearSeries(
+    records as RecordLike[],
+    yearFieldJimu,
+    recorteFieldJimu,
+    fields
+  )
 }
 
 export function buildYearSeries (

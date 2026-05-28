@@ -3,6 +3,7 @@ import {
   buildYearSeriesFromRecorteRows,
   buildYearSeriesInferred,
   buildYearSeriesFromAttributeRows,
+  describeRowsForExtractError,
   detectYearKeyFromRows,
   readAttributeFlexible,
   readRecordValue,
@@ -91,6 +92,29 @@ describe('prodes-table utils', () => {
       { Ano: 2.003, cerrado: 3 }
     ]
     expect(detectYearKeyFromRows(rows, 'ano')).toBe('Ano')
+  })
+
+  it('buildYearSeriesFromAttributeRows infers recorte column when hint does not match key', () => {
+    const rows = [
+      { Ano: 2.008, amazonia_floresta: 100 },
+      { Ano: 2.009, amazonia_floresta: 200 }
+    ]
+    const series = buildYearSeriesFromAttributeRows(
+      rows,
+      'ano',
+      'amazonia_floresta'
+    )
+    expect(series).toEqual([
+      { year: 2008, value: 100 },
+      { year: 2009, value: 200 }
+    ])
+  })
+
+  it('describeRowsForExtractError lists detected columns', () => {
+    const rows = [{ Ano: 2.008, cerrado: 1 }]
+    const msg = describeRowsForExtractError(rows, 'cerrado')
+    expect(msg).toContain('Ano')
+    expect(msg).toContain('cerrado')
   })
 
   it('buildYearSeriesFromAttributeRows reads raw REST attribute rows', () => {
