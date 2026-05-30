@@ -51,6 +51,7 @@ export function useProdesSeries ({
   )
 
   const effectiveYearField = yearField ?? detectYearField(fieldList)
+  const effectiveRecorteField = recorteField?.trim() || undefined
 
   const applySchema = React.useCallback((schema: IMDataSourceSchema) => {
     setFieldList(schemaToFieldList(schema))
@@ -65,7 +66,7 @@ export function useProdesSeries ({
 
   const loadSeries = React.useCallback(async () => {
     const main = getQueryableDataSource(dsRef)
-    if (!main || !effectiveYearField || !recorteField) {
+    if (!main || !effectiveYearField || !effectiveRecorteField) {
       setSeries([])
       return
     }
@@ -77,43 +78,53 @@ export function useProdesSeries ({
     setError(null)
     const fetchOpts = {
       yearFieldJimu: effectiveYearField,
-      recorteFieldJimu: recorteField,
-      fields: fieldList,
+      recorteFieldJimu: effectiveRecorteField,
+      fields: fieldList.length > 0 ? fieldList : undefined,
       widgetId
     }
 
     try {
-      const rows = await forceLoadProdesRows(main, fetchOpts)
-      let built = buildYearSeriesFromAttributeRows(
-        rows,
+      const records = await fetchLayerRecords(main, {
+        ...fetchOpts,
+        forceQuery: true
+      })
+      let built = buildYearSeriesFromRecords(
+        records,
         effectiveYearField,
-        recorteField,
-        fieldList
+        effectiveRecorteField,
+        fieldList.length > 0 ? fieldList : undefined
       )
 
-      if (built.length === 0 && fieldList.length > 0) {
-        const records = await fetchLayerRecords(main, {
-          ...fetchOpts,
-          forceQuery: true
-        })
-        built = buildYearSeriesFromRecords(
-          records,
+      let attributeRows: Record<string, unknown>[] = []
+      if (built.length === 0) {
+        attributeRows = await forceLoadProdesRows(main, fetchOpts)
+        built = buildYearSeriesFromAttributeRows(
+          attributeRows,
           effectiveYearField,
-          recorteField,
-          fieldList
+          effectiveRecorteField,
+          fieldList.length > 0 ? fieldList : undefined
         )
       }
 
       setSeries(built)
 
       if (built.length === 0) {
-        if (rows.length === 0) {
+        const rows =
+          attributeRows.length > 0
+            ? attributeRows
+            : await forceLoadProdesRows(main, fetchOpts)
+        if (rows.length === 0 && records.length === 0) {
           setError(MSG_LOAD_FAILED)
-        } else if (attributeRowsScore(rows) <= 1) {
+        } else if (rows.length > 0 && attributeRowsScore(rows) <= 1) {
           setError(MSG_LOAD_FAILED)
         } else {
           setError(
-            MSG_EXTRACT_FAILED + describeRowsForExtractError(rows, recorteField)
+            MSG_EXTRACT_FAILED +
+              describeRowsForExtractError(
+                rows.length > 0 ? rows : records.map((r) => r.getData()?.attributes ?? {}),
+                effectiveRecorteField,
+                fieldList.length > 0 ? fieldList : undefined
+              )
           )
         }
       }
@@ -124,7 +135,14 @@ export function useProdesSeries ({
       setLoading(false)
       setLoadingMessage(null)
     }
-  }, [dsRef, dsStatus, effectiveYearField, fieldList, recorteField, widgetId])
+  }, [
+    dsRef,
+    dsStatus,
+    effectiveYearField,
+    effectiveRecorteField,
+    fieldList,
+    widgetId
+  ])
 
   const handleDataSourceInfoChange = React.useCallback(
     (info: { status?: DataSourceStatus; version?: number }) => {
@@ -137,11 +155,11 @@ export function useProdesSeries ({
   )
 
   React.useEffect(() => {
-    if (!recorteField || !effectiveYearField || !dsRef) return
+    if (!effectiveRecorteField || !effectiveYearField || !dsRef) return
     if (!isProdesDataReady(dsStatus)) return
     loadSeries()
   }, [
-    recorteField,
+    effectiveRecorteField,
     effectiveYearField,
     dsRef,
     dsStatus,

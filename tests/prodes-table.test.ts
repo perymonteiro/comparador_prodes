@@ -137,6 +137,7 @@ describe('prodes-table utils', () => {
     const msg = describeRowsForExtractError(rows, 'cerrado')
     expect(msg).toContain('Ano')
     expect(msg).toContain('cerrado')
+    expect(msg).toContain('Recorte configurado')
   })
 
   it('buildYearSeriesFromAttributeRows reads raw REST attribute rows', () => {

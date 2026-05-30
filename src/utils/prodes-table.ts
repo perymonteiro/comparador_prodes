@@ -654,18 +654,21 @@ export function detectRecorteKeyFromRows (
   recorteHint: string
 ): string | null {
   if (!rows.length) return null
+  const hint = recorteHint?.trim()
+  if (!hint) return null
+
   const keys = new Set<string>()
-  for (const row of rows.slice(0, 5)) {
+  for (const row of rows.slice(0, 50)) {
     Object.keys(row).forEach((k) => keys.add(k))
   }
   const exact = [...keys].find(
-    (k) => k.toLowerCase() === recorteHint.toLowerCase()
+    (k) => k.toLowerCase() === hint.toLowerCase()
   )
   if (exact) return exact
   return (
     [...keys].find(
       (k) =>
-        normalizeRecorteToken(k) === normalizeRecorteToken(recorteHint)
+        normalizeRecorteToken(k) === normalizeRecorteToken(hint)
     ) ?? null
   )
 }
@@ -689,6 +692,12 @@ export function buildYearSeriesFromAttributeRows (
   if (standard.length > 0) return standard
 
   const yearKey = detectYearKeyFromRows(rows, yearFieldJimu) ?? yearFieldJimu
+  const yearField = fields?.length
+    ? findFieldByJimuName(fields, yearFieldJimu)
+    : null
+  const recorteField = fields?.length
+    ? findFieldByJimuName(fields, recorteFieldJimu)
+    : null
   const recorteKey = resolveRecorteKeyFromRows(
     rows,
     recorteFieldJimu,
@@ -698,54 +707,75 @@ export function buildYearSeriesFromAttributeRows (
 
   if (!yearKey || !recorteKey) return []
 
-  return buildSeriesFromKeys(rows, yearKey, recorteKey)
+  return buildSeriesFromKeys(
+    rows,
+    yearKey,
+    recorteKey,
+    yearField,
+    recorteField
+  )
 }
 
 /** Resolve coluna do recorte pedido — nunca substitui por outra coluna da tabela. */
-function resolveRecorteKeyFromRows (
+export function resolveRecorteKeyFromRows (
   rows: Record<string, unknown>[],
   recorteFieldJimu: string,
   fields?: IMFieldSchema[],
   yearFieldJimu?: string
 ): string | null {
-  const fromRows = detectRecorteKeyFromRows(rows, recorteFieldJimu)
+  const hint = recorteFieldJimu?.trim()
+  if (!hint) return null
+
+  const fromRows = detectRecorteKeyFromRows(rows, hint)
   if (fromRows) return fromRows
 
   if (fields?.length) {
-    const keys = resolveAttributeKeys(fields, yearFieldJimu, recorteFieldJimu)
+    const field = findFieldByJimuName(fields, hint)
+    if (field) {
+      for (const candidate of [
+        getAttributeKey(field),
+        field.name,
+        field.jimuName,
+        field.alias
+      ]) {
+        if (!candidate) continue
+        const match = detectRecorteKeyFromRows(rows, candidate)
+        if (match) return match
+      }
+    }
+
+    const keys = resolveAttributeKeys(fields, yearFieldJimu, hint)
     if (keys?.recorteKey) {
+      const match = detectRecorteKeyFromRows(rows, keys.recorteKey)
+      if (match) return match
       const sample = rows[0]
       if (sample && keys.recorteKey in sample) return keys.recorteKey
-    }
-    const field = findFieldByJimuName(fields, recorteFieldJimu)
-    if (field) {
-      const attrKey = getAttributeKey(field)
-      const sample = rows[0]
-      if (sample && attrKey in sample) return attrKey
     }
   }
 
   const sample = rows[0]
-  if (sample && recorteFieldJimu in sample) return recorteFieldJimu
+  if (sample && hint in sample) return hint
 
-  return recorteFieldJimu
+  return hint
 }
 
 /** Resumo das colunas detectadas (ajuda diagnóstico no Enterprise). */
 export function describeRowsForExtractError (
   rows: Record<string, unknown>[],
-  recorteHint: string
+  recorteHint: string,
+  fields?: IMFieldSchema[]
 ): string {
   if (!rows.length) return ''
   const keys = Object.keys(rows[0]).filter(
     (k) => !/^(objectid|globalid|shape|fid)$/i.test(k)
   )
   const yearKey = detectYearKeyFromRows(rows)
-  const recorteKey = detectRecorteKeyFromRows(rows, recorteHint)
+  const recorteKey = resolveRecorteKeyFromRows(rows, recorteHint, fields)
   const preview = keys.slice(0, 10).join(', ')
   const suffix = keys.length > 10 ? '…' : ''
   let msg = ` Colunas na resposta: ${preview}${suffix}.`
   if (yearKey) msg += ` Coluna de ano: "${yearKey}".`
+  msg += ` Recorte configurado: "${recorteHint?.trim() ?? ''}".`
   if (recorteKey) msg += ` Coluna do recorte: "${recorteKey}".`
   return msg
 }
@@ -753,12 +783,18 @@ export function describeRowsForExtractError (
 function buildSeriesFromKeys (
   rows: Record<string, unknown>[],
   yearKey: string,
-  recorteKey: string
+  recorteKey: string,
+  yearField?: IMFieldSchema | null,
+  recorteField?: IMFieldSchema | null
 ): YearValueRow[] {
   const series: YearValueRow[] = []
   for (const row of rows) {
-    const year = parseYear(row[yearKey])
-    const value = parseNumericValue(row[recorteKey])
+    const year = parseYear(
+      readAttributeFlexible(row, yearField ?? null, yearKey)
+    )
+    const value = parseNumericValue(
+      readAttributeFlexible(row, recorteField ?? null, recorteKey)
+    )
     if (year == null || value == null) continue
     series.push({ year, value })
   }
