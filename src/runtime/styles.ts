@@ -77,6 +77,8 @@ export const widgetStyles = css`
   }
 `
 
+export const PERIOD_MENU_MAX_HEIGHT = 280
+
 export const pickerStyles = css`
   width: 100%;
   .jimu-dropdown {
@@ -87,8 +89,14 @@ export const pickerStyles = css`
     justify-content: space-between;
     text-align: left;
   }
-  .comparador-period-menu {
-    max-height: 220px;
+`
+
+/** Rolagem na lista de anos (container interno do DropdownMenu no jimu-ui). */
+export const periodMenuStyles = css`
+  &.comparador-period-menu .dropdown-item-con {
+    max-height: ${PERIOD_MENU_MAX_HEIGHT}px;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 `

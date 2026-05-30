@@ -7,7 +7,7 @@ import {
   DropdownItem
 } from 'jimu-ui'
 import { formatPeriodLabel, toggleConsecutiveYear } from '../utils/prodes-table'
-import { pickerStyles } from './styles'
+import { PERIOD_MENU_MAX_HEIGHT, pickerStyles, periodMenuStyles } from './styles'
 
 export interface YearPeriodPickerProps {
   availableYears: number[]
@@ -61,7 +61,11 @@ export const YearPeriodPicker = React.memo((props: YearPeriodPickerProps) => {
         <DropdownButton size="sm" className="w-100 dropdown-toggle">
           <span className="text-truncate">{summary}</span>
         </DropdownButton>
-        <DropdownMenu className="comparador-period-menu">
+        <DropdownMenu
+          className="comparador-period-menu"
+          css={periodMenuStyles}
+          maxHeight={PERIOD_MENU_MAX_HEIGHT}
+        >
           {availableYears.map((year) => (
             <DropdownItem
               key={year}
