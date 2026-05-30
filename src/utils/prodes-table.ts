@@ -855,6 +855,157 @@ function recordsToAttributeRows (records: DataRecord[]): Record<string, unknown>
     .filter((a) => Object.keys(a).length > 0)
 }
 
+/** Reúne registros Jimu (cache do mapa + query), deduplicados por id. */
+export async function collectProdesRecords (
+  dataSource: unknown,
+  options?: FetchLayerRecordsOptions & { widgetId?: string }
+): Promise<DataRecord[]> {
+  const ds = dataSource as QueriableLayer
+  const seen = new Set<string>()
+  const out: DataRecord[] = []
+
+  const add = (recs: DataRecord[]) => {
+    for (const rec of recs) {
+      const id = rec.getId?.()
+      const key = id != null ? String(id) : `idx-${out.length}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(rec)
+    }
+  }
+
+  add(ds.getAllLoadedRecords?.() ?? [])
+  add(ds.getRecords?.() ?? [])
+  add(await fetchLayerRecords(dataSource, { ...options, forceQuery: true }))
+
+  return out
+}
+
+/**
+ * No Enterprise a REST traz nomes de colunas, mas valores vazios; getFieldValue nos
+ * DataRecords Jimu traz os números formatados. Mescla os dois por OBJECTID ou ano.
+ */
+export function enrichAttributeRowsWithRecords (
+  rows: Record<string, unknown>[],
+  records: DataRecord[],
+  yearFieldJimu: string,
+  recorteFieldJimu: string,
+  fields?: IMFieldSchema[]
+): Record<string, unknown>[] {
+  if (!rows.length || !records.length) return rows
+
+  const yearField = fields?.length
+    ? findFieldByJimuName(fields, yearFieldJimu)
+    : null
+  const recorteField = fields?.length
+    ? findFieldByJimuName(fields, recorteFieldJimu)
+    : null
+  const yearKey =
+    detectYearKeyFromRows(rows, yearFieldJimu) ?? yearFieldJimu
+  const recorteKey =
+    resolveRecorteKeyFromRows(rows, recorteFieldJimu, fields, yearFieldJimu) ??
+    recorteFieldJimu
+
+  const byOid = new Map<string, DataRecord>()
+  const byYear = new Map<number, DataRecord>()
+  for (const rec of records) {
+    const id = rec.getId?.()
+    if (id != null) byOid.set(String(id), rec)
+    const y = parseYear(readRecordValue(rec, yearField, yearFieldJimu))
+    if (y != null) byYear.set(y, rec)
+  }
+
+  return rows.map((row, index) => {
+    const oid =
+      row.OBJECTID ?? row.objectid ?? row.ObjectId ?? row.FID ?? row.fid
+    let rec: DataRecord | undefined
+    if (oid != null) rec = byOid.get(String(oid))
+    if (!rec) {
+      const y = parseYear(readAttributeFlexible(row, yearField, yearKey))
+      if (y != null) rec = byYear.get(y)
+    }
+    if (!rec && index < records.length) rec = records[index]
+    if (!rec) return row
+
+    const enriched = { ...row }
+    const yearVal = readRecordValue(rec, yearField, yearFieldJimu)
+    if (yearVal !== undefined && parseYear(enriched[yearKey]) == null) {
+      enriched[yearKey] = yearVal
+    }
+    const recorteVal = readRecordValue(rec, recorteField, recorteFieldJimu)
+    if (recorteVal !== undefined) {
+      enriched[recorteKey] = recorteVal
+    }
+    return enriched
+  })
+}
+
+export interface LoadProdesYearSeriesResult {
+  series: YearValueRow[]
+  records: DataRecord[]
+  rows: Record<string, unknown>[]
+}
+
+const LOAD_SERIES_RETRY_MS = [0, 600, 1500, 3500, 6000]
+
+/** Carrega série ano×valor para o recorte pedido (Enterprise + local). */
+export async function loadProdesYearSeries (
+  dataSource: unknown,
+  options: FetchLayerRecordsOptions & { widgetId?: string }
+): Promise<LoadProdesYearSeriesResult> {
+  const { yearFieldJimu, recorteFieldJimu, fields } = options
+  let lastRecords: DataRecord[] = []
+  let lastRows: Record<string, unknown>[] = []
+
+  if (!yearFieldJimu || !recorteFieldJimu) {
+    return { series: [], records: [], rows: [] }
+  }
+
+  for (const delay of LOAD_SERIES_RETRY_MS) {
+    if (delay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+
+    lastRecords = await collectProdesRecords(dataSource, options)
+    let series = buildYearSeriesFromRecords(
+      lastRecords,
+      yearFieldJimu,
+      recorteFieldJimu,
+      fields
+    )
+    if (series.length > 0) {
+      return {
+        series,
+        records: lastRecords,
+        rows: recordsToAttributeRows(lastRecords)
+      }
+    }
+
+    lastRows = await fetchProdesAttributeRows(dataSource, {
+      ...options,
+      forceQuery: true
+    })
+    const enriched = enrichAttributeRowsWithRecords(
+      lastRows,
+      lastRecords,
+      yearFieldJimu,
+      recorteFieldJimu,
+      fields
+    )
+    series = buildYearSeriesFromAttributeRows(
+      enriched,
+      yearFieldJimu,
+      recorteFieldJimu,
+      fields
+    )
+    if (series.length > 0) {
+      return { series, records: lastRecords, rows: enriched }
+    }
+  }
+
+  return { series: [], records: lastRecords, rows: lastRows }
+}
+
 export async function fetchProdesAttributeRows (
   dataSource: unknown,
   options?: FetchLayerRecordsOptions
@@ -946,13 +1097,22 @@ export async function forceLoadProdesRows (
       continue
     }
 
-    const series = buildYearSeriesFromAttributeRows(
+    const records = await collectProdesRecords(dataSource, options)
+    const enriched = enrichAttributeRowsWithRecords(
       rows,
+      records,
       options.yearFieldJimu,
       options.recorteFieldJimu,
       options.fields
     )
-    if (series.length > 0) return rows
+
+    const series = buildYearSeriesFromAttributeRows(
+      enriched,
+      options.yearFieldJimu,
+      options.recorteFieldJimu,
+      options.fields
+    )
+    if (series.length > 0) return enriched
   }
 
   return fetchProdesAttributeRows(dataSource, { ...options, forceQuery: true })

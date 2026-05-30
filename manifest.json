@@ -2,7 +2,7 @@
   "name": "comparador_prodes",
   "label": "Comparador Prodes",
   "type": "widget",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "exbVersion": "1.18.0",
   "author": "Thyego Pery",
   "description": "widget dedicada a realizar cálculos da variação de desmatamento entre anos ou períodos por meio do Prodes/Inpe. Ferramenta desenvolvida com contribuição da equipe da CGCD/DPCD.",

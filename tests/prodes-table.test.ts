@@ -4,6 +4,7 @@ import {
   buildYearSeriesInferred,
   buildYearSeriesFromAttributeRows,
   describeRowsForExtractError,
+  enrichAttributeRowsWithRecords,
   detectYearKeyFromRows,
   readAttributeFlexible,
   readRecordValue,
@@ -92,6 +93,38 @@ describe('prodes-table utils', () => {
       { Ano: 2.003, cerrado: 3 }
     ]
     expect(detectYearKeyFromRows(rows, 'ano')).toBe('Ano')
+  })
+
+  it('enrichAttributeRowsWithRecords fills recorte values from Jimu records', () => {
+    const rows = [
+      { OBJECTID: 1, ano: 2008, cerrado: null },
+      { OBJECTID: 2, ano: 2009, cerrado: null }
+    ]
+    const records = [
+      {
+        getId: () => '1',
+        getFieldValue: (name: string) =>
+          name === 'cerrado' ? 100 : name === 'ano' ? 2008 : undefined,
+        getData: () => ({ attributes: {} })
+      },
+      {
+        getId: () => '2',
+        getFieldValue: (name: string) =>
+          name === 'cerrado' ? 200 : name === 'ano' ? 2009 : undefined,
+        getData: () => ({ attributes: {} })
+      }
+    ]
+    const enriched = enrichAttributeRowsWithRecords(
+      rows,
+      records as any,
+      'ano',
+      'cerrado'
+    )
+    const series = buildYearSeriesFromAttributeRows(enriched, 'ano', 'cerrado')
+    expect(series).toEqual([
+      { year: 2008, value: 100 },
+      { year: 2009, value: 200 }
+    ])
   })
 
   it('buildYearSeriesFromAttributeRows uses only requested recorte column', () => {

@@ -6,12 +6,10 @@ import {
 } from 'jimu-core'
 import {
   attributeRowsScore,
-  buildYearSeriesFromAttributeRows,
-  buildYearSeriesFromRecords,
   describeRowsForExtractError,
   detectYearField,
-  fetchLayerRecords,
-  forceLoadProdesRows,
+  enrichAttributeRowsWithRecords,
+  loadProdesYearSeries,
   schemaToFieldList,
   type YearValueRow
 } from '../../utils/prodes-table'
@@ -76,6 +74,7 @@ export function useProdesSeries ({
     setLoading(true)
     setLoadingMessage(MSG_LOADING_TABLE)
     setError(null)
+
     const fetchOpts = {
       yearFieldJimu: effectiveYearField,
       recorteFieldJimu: effectiveRecorteField,
@@ -84,35 +83,13 @@ export function useProdesSeries ({
     }
 
     try {
-      const records = await fetchLayerRecords(main, {
-        ...fetchOpts,
-        forceQuery: true
-      })
-      let built = buildYearSeriesFromRecords(
-        records,
-        effectiveYearField,
-        effectiveRecorteField,
-        fieldList.length > 0 ? fieldList : undefined
+      const { series: built, records, rows } = await loadProdesYearSeries(
+        main,
+        fetchOpts
       )
-
-      let attributeRows: Record<string, unknown>[] = []
-      if (built.length === 0) {
-        attributeRows = await forceLoadProdesRows(main, fetchOpts)
-        built = buildYearSeriesFromAttributeRows(
-          attributeRows,
-          effectiveYearField,
-          effectiveRecorteField,
-          fieldList.length > 0 ? fieldList : undefined
-        )
-      }
-
       setSeries(built)
 
       if (built.length === 0) {
-        const rows =
-          attributeRows.length > 0
-            ? attributeRows
-            : await forceLoadProdesRows(main, fetchOpts)
         if (rows.length === 0 && records.length === 0) {
           setError(MSG_LOAD_FAILED)
         } else if (rows.length > 0 && attributeRowsScore(rows) <= 1) {
@@ -121,7 +98,7 @@ export function useProdesSeries ({
           setError(
             MSG_EXTRACT_FAILED +
               describeRowsForExtractError(
-                rows.length > 0 ? rows : records.map((r) => r.getData()?.attributes ?? {}),
+                rows,
                 effectiveRecorteField,
                 fieldList.length > 0 ? fieldList : undefined
               )
