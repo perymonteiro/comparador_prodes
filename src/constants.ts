@@ -22,6 +22,9 @@ export const MSG_LOAD_FAILED = 'Não foi possível carregar os dados da camada.'
 
 export const MSG_LOADING_TABLE = 'Carregando dados da tabela PRODES…'
 
+export const MSG_INVALID_RECORTE =
+  'Recorte geográfico inválido na configuração. Abra as configurações desta widget e selecione o recorte novamente.'
+
 export const MSG_EXTRACT_FAILED =
   'Registros encontrados, mas não foi possível extrair ano e valores para este recorte. ' +
   'Confirme se a tabela tem uma linha por ano (coluna "ano") ou uma linha por recorte (colunas com anos), ' +

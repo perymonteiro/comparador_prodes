@@ -20,9 +20,11 @@ import {
 } from '../../utils/data-source'
 import {
   MSG_EXTRACT_FAILED,
+  MSG_INVALID_RECORTE,
   MSG_LOAD_FAILED,
   MSG_LOADING_TABLE
 } from '../../constants'
+import { normalizeRecorteFieldConfig } from '../../utils/recorte-config'
 
 export interface UseProdesSeriesParams {
   recorteField?: string
@@ -49,7 +51,7 @@ export function useProdesSeries ({
   )
 
   const effectiveYearField = yearField ?? detectYearField(fieldList)
-  const effectiveRecorteField = recorteField?.trim() || undefined
+  const effectiveRecorteField = normalizeRecorteFieldConfig(recorteField)
 
   const applySchema = React.useCallback((schema: IMDataSourceSchema) => {
     setFieldList(schemaToFieldList(schema))
@@ -64,7 +66,18 @@ export function useProdesSeries ({
 
   const loadSeries = React.useCallback(async () => {
     const main = getQueryableDataSource(dsRef)
-    if (!main || !effectiveYearField || !effectiveRecorteField) {
+    if (!main || !effectiveYearField) {
+      setSeries([])
+      return
+    }
+
+    if (recorteField != null && !effectiveRecorteField) {
+      setSeries([])
+      setError(MSG_INVALID_RECORTE)
+      return
+    }
+
+    if (!effectiveRecorteField) {
       setSeries([])
       return
     }
@@ -117,6 +130,7 @@ export function useProdesSeries ({
     dsStatus,
     effectiveYearField,
     effectiveRecorteField,
+    recorteField,
     fieldList,
     widgetId
   ])

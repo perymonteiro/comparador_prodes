@@ -8,6 +8,7 @@ import {
 } from 'jimu-core'
 import { Loading, Label, Button } from 'jimu-ui'
 import type { IMConfig } from '../config'
+import { normalizeRecorteFieldConfig } from '../utils/recorte-config'
 import {
   LABEL_PERIODO_FINAL,
   LABEL_PERIODO_INICIAL,
@@ -27,7 +28,7 @@ import { YearPeriodPicker } from './year-period-picker'
 const Widget = (props: AllWidgetProps<IMConfig>) => {
   const useDs = props.useDataSources?.[0]
   const yearField = props.config?.yearField
-  const recorteField = props.config?.recorteField
+  const recorteField = normalizeRecorteFieldConfig(props.config?.recorteField)
 
   const {
     series,

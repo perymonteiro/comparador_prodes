@@ -8,6 +8,7 @@ import {
   esri,
   requestUtils
 } from 'jimu-core'
+import { normalizeRecorteFieldConfig } from './recorte-config'
 
 export interface YearValueRow {
   year: number
@@ -770,12 +771,14 @@ export function describeRowsForExtractError (
     (k) => !/^(objectid|globalid|shape|fid)$/i.test(k)
   )
   const yearKey = detectYearKeyFromRows(rows)
-  const recorteKey = resolveRecorteKeyFromRows(rows, recorteHint, fields)
+  const recorteHintNorm =
+    normalizeRecorteFieldConfig(recorteHint) ?? String(recorteHint ?? '')
+  const recorteKey = resolveRecorteKeyFromRows(rows, recorteHintNorm, fields)
   const preview = keys.slice(0, 10).join(', ')
   const suffix = keys.length > 10 ? '…' : ''
   let msg = ` Colunas na resposta: ${preview}${suffix}.`
   if (yearKey) msg += ` Coluna de ano: "${yearKey}".`
-  msg += ` Recorte configurado: "${recorteHint?.trim() ?? ''}".`
+  msg += ` Recorte configurado: "${recorteHintNorm}".`
   if (recorteKey) msg += ` Coluna do recorte: "${recorteKey}".`
   return msg
 }

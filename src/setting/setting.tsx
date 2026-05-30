@@ -14,6 +14,10 @@ import { DataSourceSelector } from 'jimu-ui/advanced/data-source-selector'
 import { type IMConfig } from '../config'
 import { getDataSourceSchema } from '../utils/data-source'
 import {
+  extractRecorteSelectValue,
+  normalizeRecorteFieldConfig
+} from '../utils/recorte-config'
+import {
   detectYearField,
   formatRecorteLabel,
   getRecorteCandidateFields,
@@ -65,7 +69,7 @@ const Setting = (props: Props) => {
   const { id, useDataSources, onSettingChange, config } = props
   const useDs = useDataSources?.[0]
   const yearField = config?.yearField
-  const recorteField = config?.recorteField
+  const recorteField = normalizeRecorteFieldConfig(config?.recorteField)
 
   const [fieldList, setFieldList] = React.useState(
     [] as ReturnType<typeof schemaToFieldList>
@@ -123,12 +127,37 @@ const Setting = (props: Props) => {
     [config, id, onSettingChange]
   )
 
+  React.useEffect(() => {
+    const raw = config?.recorteField
+    if (raw == null) return
+    const normalized = normalizeRecorteFieldConfig(raw)
+    if (!normalized) {
+      onSettingChange?.({
+        id,
+        config: (config ?? emptyConfig()).without('recorteField')
+      })
+      return
+    }
+    if (typeof raw === 'string' && raw.trim() === normalized) return
+    if (typeof raw !== 'string' || raw.trim() !== normalized) {
+      onSettingChange?.({
+        id,
+        config: (config ?? emptyConfig()).set('recorteField', normalized)
+      })
+    }
+  }, [config, id, onSettingChange])
+
   const handleRecorteSelect = React.useCallback(
-    (value: string) => {
+    (evt: unknown, value: unknown) => {
+      const normalized = normalizeRecorteFieldConfig(
+        extractRecorteSelectValue(evt, value)
+      )
       const base = config ?? emptyConfig()
       onSettingChange?.({
         id,
-        config: value ? base.set('recorteField', value) : base.without('recorteField')
+        config: normalized
+          ? base.set('recorteField', normalized)
+          : base.without('recorteField')
       })
     },
     [config, id, onSettingChange]
@@ -165,7 +194,7 @@ const Setting = (props: Props) => {
                 className="w-100"
                 value={recorteField ?? ''}
                 placeholder="Selecione o recorte…"
-                onChange={(_evt, value) => handleRecorteSelect(String(value ?? ''))}
+                onChange={(evt, value) => handleRecorteSelect(evt, value)}
                 disabled={recorteOptions.length === 0}
               >
                 <Option value="">{''}</Option>
