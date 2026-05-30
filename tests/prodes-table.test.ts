@@ -94,6 +94,28 @@ describe('prodes-table utils', () => {
     expect(detectYearKeyFromRows(rows, 'ano')).toBe('Ano')
   })
 
+  it('buildYearSeriesFromAttributeRows uses only requested recorte column', () => {
+    const rows = [
+      { Ano: 2.008, amazonia_floresta: 9999, cerrado: 100 },
+      { Ano: 2.009, amazonia_floresta: 8888, cerrado: 200 }
+    ]
+    const fields = [
+      { jimuName: 'ano', name: 'Ano', type: JimuFieldType.Number },
+      { jimuName: 'amazonia_floresta', name: 'amazonia_floresta', type: JimuFieldType.Number },
+      { jimuName: 'cerrado', name: 'cerrado', type: JimuFieldType.Number }
+    ]
+    const series = buildYearSeriesFromAttributeRows(
+      rows,
+      'ano',
+      'cerrado',
+      fields as any
+    )
+    expect(series).toEqual([
+      { year: 2008, value: 100 },
+      { year: 2009, value: 200 }
+    ])
+  })
+
   it('buildYearSeriesFromAttributeRows infers recorte column when hint does not match key', () => {
     const rows = [
       { Ano: 2.008, amazonia_floresta: 100 },

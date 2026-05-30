@@ -689,52 +689,46 @@ export function buildYearSeriesFromAttributeRows (
   if (standard.length > 0) return standard
 
   const yearKey = detectYearKeyFromRows(rows, yearFieldJimu) ?? yearFieldJimu
-  let recorteKey =
-    detectRecorteKeyFromRows(rows, recorteFieldJimu) ?? recorteFieldJimu
+  const recorteKey = resolveRecorteKeyFromRows(
+    rows,
+    recorteFieldJimu,
+    fields,
+    yearFieldJimu
+  )
 
-  if (!yearKey) return []
+  if (!yearKey || !recorteKey) return []
 
-  let series = buildSeriesFromKeys(rows, yearKey, recorteKey)
-  if (series.length > 0) return series
-
-  if (fields?.length) {
-    for (const f of getRecorteCandidateFields(fields, yearFieldJimu)) {
-      const altKey =
-        detectRecorteKeyFromRows(rows, f.jimuName) ?? f.jimuName
-      series = buildSeriesFromKeys(rows, yearKey, altKey)
-      if (series.length > 0) return series
-    }
-  }
-
-  const altRecorte = findBestRecorteKeyByNumericFill(rows, yearKey)
-  if (altRecorte && altRecorte !== recorteKey) {
-    series = buildSeriesFromKeys(rows, yearKey, altRecorte)
-    if (series.length > 0) return series
-  }
-
-  return series
+  return buildSeriesFromKeys(rows, yearKey, recorteKey)
 }
 
-function findBestRecorteKeyByNumericFill (
+/** Resolve coluna do recorte pedido — nunca substitui por outra coluna da tabela. */
+function resolveRecorteKeyFromRows (
   rows: Record<string, unknown>[],
-  yearKey: string
+  recorteFieldJimu: string,
+  fields?: IMFieldSchema[],
+  yearFieldJimu?: string
 ): string | null {
-  const keys = new Set<string>()
-  for (const row of rows.slice(0, 50)) {
-    Object.keys(row).forEach((k) => keys.add(k))
+  const fromRows = detectRecorteKeyFromRows(rows, recorteFieldJimu)
+  if (fromRows) return fromRows
+
+  if (fields?.length) {
+    const keys = resolveAttributeKeys(fields, yearFieldJimu, recorteFieldJimu)
+    if (keys?.recorteKey) {
+      const sample = rows[0]
+      if (sample && keys.recorteKey in sample) return keys.recorteKey
+    }
+    const field = findFieldByJimuName(fields, recorteFieldJimu)
+    if (field) {
+      const attrKey = getAttributeKey(field)
+      const sample = rows[0]
+      if (sample && attrKey in sample) return attrKey
+    }
   }
 
-  let best: { key: string; count: number } | null = null
-  for (const key of keys) {
-    if (key.toLowerCase() === yearKey.toLowerCase()) continue
-    if (/^(objectid|globalid|shape|fid)$/i.test(key)) continue
-    let count = 0
-    for (const row of rows) {
-      if (parseNumericValue(row[key]) != null) count++
-    }
-    if (!best || count > best.count) best = { key, count }
-  }
-  return best && best.count > 0 ? best.key : null
+  const sample = rows[0]
+  if (sample && recorteFieldJimu in sample) return recorteFieldJimu
+
+  return recorteFieldJimu
 }
 
 /** Resumo das colunas detectadas (ajuda diagnóstico no Enterprise). */
